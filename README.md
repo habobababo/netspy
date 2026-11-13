@@ -8,7 +8,8 @@ Ein kleiner NetAlertX-Ersatz:
 - Web-UI: Geräte benennen, Online-Status, Suche, Filter
 - eigene Seite **Ereignisse** (`#/events`): neu / online / offline / IP geändert, filterbar, mit Telegram-Zustellstatus (✓ / ✕)
 - **Telegram**: Nachricht bei neuem Gerät (mit dem Namen, den das Gerät meldet), Online/Offline-Meldungen für markierte Geräte (🔔)
-- **Telegram-Befehle**: `/check NAME`, `/online [vlan]`, `/offline [vlan]`, `/status`, `/scan`
+- **Telegram-Befehle**: `/check NAME`, `/online [vlan]`, `/offline [vlan]`, `/status`, `/scan`, `/traffic NAME`, `/top`
+- **Traffic pro Gerät**: live ↑/↓ in der Geräteliste, Verlauf (24 h / 7 Tage / 30 Tage) in der Detailansicht, Seite **Traffic** (`#/traffic`) mit Top-Verbrauchern pro Gerät und VLAN, optional Telegram-Alarm bei Dauerlast
 
 Keine Abhängigkeiten außer Python – das Image ist sehr klein.
 
@@ -18,6 +19,10 @@ Keine Abhängigkeiten außer Python – das Image ist sehr klein.
 2. Rechte (*Effektive Rechte*) mindestens:
    - `Diagnostics: ARP Table`
    - je nach DHCP-Dienst: `Services: DHCP: Kea(v4)`, `Status: DHCP leases` (ISC) oder `Services: Dnsmasq DNS/DHCP`
+   - für Traffic: `Reporting: Traffic` (ältere Versionen: `Diagnostics: Traffic Graph`)
+   - optional für den Verlauf aus Insight: `Reporting: Insight` (ältere Versionen: `Diagnostics: Network Insight`) und `Diagnostics: Netflow configuration` (nur für die Prüfung, ob Netflow aktiv ist)
+
+   Fehlt ein Recht, zeigt NetWatch oben im UI und auf der Traffic-Seite genau an, welches.
 3. Beim Benutzer unter *API-Schlüssel* auf **+** → Datei mit `key` und `secret` wird heruntergeladen.
 
 ## 2. UniFi (optional)
@@ -46,6 +51,21 @@ docker compose up -d --build
 ```
 
 Web-UI: `http://<docker-host>:8080`
+
+## Traffic
+
+NetWatch fragt alle `TRAFFIC_INTERVAL` Sekunden (Standard 30) die **Top Talker** der OPNsense ab (`/api/diagnostics/traffic/top/<interfaces>`, dieselben Daten wie *Reporting → Traffic → Top Talkers*) und ordnet die Raten den Geräten per IP zu. Abgefragt werden automatisch alle Interfaces, an denen laut ARP-Tabelle Geräte hängen (also deine VLANs, nicht WAN) – oder fest die in `TRAFFIC_INTERFACES` (z. B. `lan,opt1,opt2`, Schlüssel wie unter *Schnittstellen → Zuweisungen*).
+
+- **Live**: ↓ Download / ↑ Upload je Gerät in der Geräteliste und in der Detailansicht.
+- **Verlauf**: Aus den Raten werden Bytes hochgerechnet (Rate × Zeit) und pro Gerät und Stunde bzw. Tag in SQLite gespeichert. Das ist eine Schätzung – kurze Spitzen zwischen zwei Abfragen fehlen, und Top Talker listet nur die aktivsten Adressen.
+- **Insight / Netflow (optional, genauer)**: Ist unter *Reporting → NetFlow* die lokale Erfassung („Capture local“) für die VLAN-Interfaces aktiv, übernimmt NetWatch alle 10 Minuten abgeschlossene Stunden aus Insight (`/api/diagnostics/networkinsight/top/FlowSourceAddrTotals/…`) und ersetzt damit die hochgerechneten Werte. Beim ersten Start werden die letzten `TRAFFIC_INSIGHT_BACKFILL_HOURS` Stunden nachgeladen. `TRAFFIC_INSIGHT=false` schaltet das ab.
+- **Aufbewahrung**: Stundenwerte `TRAFFIC_HOURLY_DAYS` Tage (Standard 31), Tageswerte `TRAFFIC_DAILY_DAYS` Tage (Standard 365).
+- **Alarm**: Für Geräte mit 🔔 kommt eine Telegram-Nachricht, wenn sie länger als `TRAFFIC_ALERT_MINUTES` über `TRAFFIC_ALERT_MBS` MB/s liegen (z. B. 5 MB/s für 10 min), und eine Entwarnung, wenn es vorbei ist. In der Detailansicht lässt sich pro Gerät ein eigener Wert setzen (leer = Standard, `0` = aus). `TRAFFIC_ALERT_DIRECTION` = `total` (↑+↓), `down` oder `up`.
+- **Telegram**: `/traffic NAME` (live, heute, 24 h, 7 Tage, 30 Tage), `/top` (jetzt + letzte 24 h), `/top 7d`, `/top 30d`, `/top live`, mit VLAN-Nummer gefiltert z. B. `/top 24h 20`.
+
+> **Wichtig:** Die Firewall sieht nur Verkehr, der **über sie** läuft – ins Internet und zwischen VLANs. Verkehr zwischen zwei Geräten im **selben** VLAN (z. B. PC ↔ NAS im gleichen Netz) geht direkt über den Switch und taucht in NetWatch nicht auf.
+
+Verkehr zwischen zwei VLANs sieht die Firewall auf beiden VLAN-Interfaces; NetWatch zählt ihn pro Gerät nur einmal (vom Interface, an dem das Gerät laut ARP hängt). Wirken ↑ und ↓ vertauscht, `TRAFFIC_SWAP_DIRECTION=true` setzen.
 
 ## Online-Erkennung
 
@@ -92,5 +112,16 @@ Daten liegen in `./data/netwatch.db` (SQLite).
 | `NOTIFY_NEW_DEVICES` | `true` | Meldung bei neuem Gerät |
 | `WATCH_NEW_DEVICES` | `false` | neue Geräte automatisch 🔔 beobachten |
 | `TELEGRAM_COMMANDS` | `true` | Bot-Befehle aktivieren |
+| `TRAFFIC_ENABLED` | `true` | Traffic-Erfassung an/aus |
+| `TRAFFIC_INTERVAL` | `30` | Sekunden zwischen Top-Talker-Abfragen (min. 10) |
+| `TRAFFIC_INTERFACES` | – | feste Interface-Liste, z. B. `lan,opt1,opt2` (leer = automatisch) |
+| `TRAFFIC_SWAP_DIRECTION` | `false` | ↑/↓ vertauschen |
+| `TRAFFIC_INSIGHT` | `auto` | Verlauf aus Insight: `auto`, `true`, `false` |
+| `TRAFFIC_INSIGHT_BACKFILL_HOURS` | `24` | so viele Stunden beim ersten Start aus Insight nachladen |
+| `TRAFFIC_HOURLY_DAYS` | `31` | Stundenwerte aufbewahren (Tage, min. 8) |
+| `TRAFFIC_DAILY_DAYS` | `365` | Tageswerte aufbewahren (Tage, min. 31) |
+| `TRAFFIC_ALERT_MBS` | `0` | Alarm-Schwelle in MB/s für 🔔-Geräte (0 = aus) |
+| `TRAFFIC_ALERT_MINUTES` | `10` | so lange muss die Schwelle überschritten sein |
+| `TRAFFIC_ALERT_DIRECTION` | `total` | `total`, `down` oder `up` |
 | `WEB_PORT` | `8080` | Port des Web-UI |
 | `WEB_USER` / `WEB_PASSWORD` | `admin` / leer | Login fürs Web-UI (leer = ohne) |

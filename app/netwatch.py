@@ -7,6 +7,7 @@ NetWatch – kleiner NetAlertX-Ersatz für OPNsense.
 - Web-UI zum Benennen / Beobachten von Geräten
 - Online-Prüfung (Ping + ARP)
 - Telegram-Benachrichtigungen + Bot-Befehle (/online, /offline, /status <name>)
+- Traffic pro Gerät (OPNsense Top Talker, optional Insight/Netflow) mit Verlauf + Alarm
 
 Nur Python-Standardbibliothek, keine Abhängigkeiten.
 """
@@ -53,6 +54,13 @@ def env_int(key, default):
         return default
 
 
+def env_float(key, default):
+    try:
+        return float(str(env(key, default)).replace(",", "."))
+    except (TypeError, ValueError):
+        return default
+
+
 OPN_URL = (env("OPNSENSE_URL", "https://192.168.10.1") or "").rstrip("/")
 OPN_KEY = env("OPNSENSE_KEY", "")
 OPN_SECRET = env("OPNSENSE_SECRET", "")
@@ -91,6 +99,18 @@ UNIFI_SITE = env("UNIFI_SITE", "default")
 UNIFI_IS_OS = env_bool("UNIFI_IS_UNIFI_OS", True)           # UDM / Cloud Key Gen2 / UniFi OS Server
 UNIFI_VERIFY_SSL = env_bool("UNIFI_VERIFY_SSL", False)
 UNIFI_USE_NAMES = env_bool("UNIFI_USE_NAMES", True)         # Aliasnamen aus UniFi übernehmen
+
+TRAFFIC_ENABLED = env_bool("TRAFFIC_ENABLED", True)
+TRAFFIC_INTERVAL = max(10, env_int("TRAFFIC_INTERVAL", 30))         # Sekunden zwischen Top-Talker-Abfragen
+TRAFFIC_INTERFACES = [x.strip() for x in env("TRAFFIC_INTERFACES", "").split(",") if x.strip()]  # leer = automatisch
+TRAFFIC_SWAP = env_bool("TRAFFIC_SWAP_DIRECTION", False)            # ↑/↓ vertauscht? -> true
+TRAFFIC_INSIGHT = (env("TRAFFIC_INSIGHT", "auto") or "auto").lower()  # auto | true | false
+TRAFFIC_INSIGHT_BACKFILL = env_int("TRAFFIC_INSIGHT_BACKFILL_HOURS", 24)
+TRAFFIC_HOURLY_DAYS = max(8, env_int("TRAFFIC_HOURLY_DAYS", 31))     # Stundenwerte aufbewahren (min. 8 für 7-Tage-Grafik)
+TRAFFIC_DAILY_DAYS = max(31, env_int("TRAFFIC_DAILY_DAYS", 365))     # Tageswerte aufbewahren
+TRAFFIC_ALERT_MBS = env_float("TRAFFIC_ALERT_MBS", 0)               # MB/s, 0 = kein Alarm
+TRAFFIC_ALERT_MINUTES = max(1, env_int("TRAFFIC_ALERT_MINUTES", 10))
+TRAFFIC_ALERT_DIRECTION = (env("TRAFFIC_ALERT_DIRECTION", "total") or "total").lower()  # total | down | up
 
 WEB_PORT = env_int("WEB_PORT", 8080)
 WEB_USER = env("WEB_USER", "admin")
@@ -143,12 +163,32 @@ def db():
                 text   TEXT
             );
             CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
+            -- rx = Download (zum Gerät), tx = Upload (vom Gerät), Bytes
+            CREATE TABLE IF NOT EXISTS traffic_hourly (
+                device INTEGER NOT NULL,
+                ts     INTEGER NOT NULL,
+                rx     INTEGER DEFAULT 0,
+                tx     INTEGER DEFAULT 0,
+                src    TEXT DEFAULT 'live',
+                PRIMARY KEY (device, ts)
+            );
+            CREATE TABLE IF NOT EXISTS traffic_daily (
+                device INTEGER NOT NULL,
+                ts     INTEGER NOT NULL,
+                rx     INTEGER DEFAULT 0,
+                tx     INTEGER DEFAULT 0,
+                PRIMARY KEY (device, ts)
+            );
+            CREATE INDEX IF NOT EXISTS traffic_hourly_ts ON traffic_hourly(ts);
+            CREATE INDEX IF NOT EXISTS traffic_daily_ts ON traffic_daily(ts);
             """
         )
         cols = {r["name"] for r in _db.execute("PRAGMA table_info(devices)")}
         for col in ("unifi_name", "conn"):
             if col not in cols:
                 _db.execute(f"ALTER TABLE devices ADD COLUMN {col} TEXT DEFAULT ''")
+        if "traffic_limit" not in cols:   # MB/s, NULL = Standard (TRAFFIC_ALERT_MBS), 0 = aus
+            _db.execute("ALTER TABLE devices ADD COLUMN traffic_limit REAL DEFAULT NULL")
         ecols = {r["name"] for r in _db.execute("PRAGMA table_info(events)")}
         if "tg" not in ecols:
             _db.execute("ALTER TABLE events ADD COLUMN tg TEXT DEFAULT ''")
@@ -257,7 +297,7 @@ class OPNsense:
         self.headers = {"Authorization": "Basic " + token, "Accept": "application/json"}
         self.lease_endpoint = None  # wird beim ersten erfolgreichen Abruf gemerkt
 
-    def _req(self, path, payload=None):
+    def _req(self, path, payload=None, timeout=20):
         url = OPN_URL + path
         data = None
         headers = dict(self.headers)
@@ -268,8 +308,62 @@ class OPNsense:
         # Proxy-Variablen für das lokale Netz ignorieren
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}),
                                              urllib.request.HTTPSHandler(context=self.ctx))
-        with opener.open(req, timeout=20) as r:
+        with opener.open(req, timeout=timeout) as r:
             return json.loads(r.read().decode() or "null")
+
+    def _call(self, path, right, payload=None, timeout=20):
+        """Wie _req, aber mit verständlichen Fehlermeldungen (401/403/nicht erreichbar)."""
+        try:
+            return self._req(path, payload, timeout)
+        except urllib.error.HTTPError as e:
+            if e.code == 401:
+                raise RuntimeError("401 – API-Key/Secret falsch (OPNSENSE_KEY / OPNSENSE_SECRET prüfen)")
+            if e.code == 403:
+                raise ApiPermissionError(
+                    f"403 – dem API-Benutzer fehlt das Recht {right} "
+                    "(OPNsense: System → Zugang → Benutzer → Benutzer bearbeiten → Effektive Rechte)")
+            raise
+        except urllib.error.URLError as e:
+            raise RuntimeError(f"OPNsense nicht erreichbar unter {OPN_URL}: {e.reason}")
+
+    # ---- Traffic (Reporting → Traffic) ----
+    RIGHT_TRAFFIC = "„Reporting: Traffic“ (ältere Versionen: „Diagnostics: Traffic Graph“)"
+    RIGHT_INSIGHT = "„Reporting: Insight“ (ältere Versionen: „Diagnostics: Network Insight“)"
+
+    def traffic_interfaces(self):
+        """Interface-Schlüssel (lan, opt1 …) -> {name, device}."""
+        res = self._call("/api/diagnostics/traffic/interface", self.RIGHT_TRAFFIC)
+        if isinstance(res, dict) and isinstance(res.get("interfaces"), dict):
+            res = res["interfaces"]
+        out = {}
+        for k, v in (res or {}).items() if isinstance(res, dict) else []:
+            if isinstance(v, dict):
+                out[k] = {"name": v.get("name") or k, "device": v.get("device") or v.get("if") or ""}
+        return out
+
+    def traffic_top(self, keys):
+        """Top Talker der Interfaces (iftop auf der Firewall, dauert ein paar Sekunden)."""
+        path = "/api/diagnostics/traffic/top/" + urllib.parse.quote(",".join(keys), safe=",")
+        res = self._call(path, self.RIGHT_TRAFFIC, timeout=90)
+        return res if isinstance(res, dict) else {}
+
+    # ---- Insight / Netflow (optional) ----
+    def netflow_enabled(self):
+        """True/False, None = unbekannt (fehlendes Recht oder alte Version)."""
+        try:
+            res = self._req("/api/diagnostics/netflow/isEnabled")
+        except Exception:
+            return None
+        if not isinstance(res, dict):
+            return None
+        return str(res.get("local", res.get("netflow", ""))).lower() in ("1", "true")
+
+    def insight_top(self, frm, to, max_hits=2000):
+        """Summen pro Quell-Adresse, Interface und Richtung im Zeitraum (Bytes)."""
+        path = (f"/api/diagnostics/networkinsight/top/FlowSourceAddrTotals/{int(frm)}/{int(to)}"
+                f"/if,src_addr,direction/octets/{max_hits}")
+        res = self._call(path, self.RIGHT_INSIGHT, timeout=60)
+        return res if isinstance(res, list) else []
 
     def arp(self):
         """Liste von dicts mit mac, ip, intf, manufacturer, hostname, expired, permanent."""
@@ -326,6 +420,10 @@ class OPNsense:
                     out.append({"mac": mac, "ip": ip, "hostname": host})
             break
         return out
+
+
+class ApiPermissionError(RuntimeError):
+    pass
 
 
 opn = OPNsense()
@@ -562,6 +660,8 @@ def tg_bot_loop():
             {"command": "offline", "description": "Alle Geräte offline [vlan]"},
             {"command": "status", "description": "Übersicht"},
             {"command": "scan", "description": "Sofort scannen"},
+            {"command": "traffic", "description": "Traffic eines Geräts (Name/IP/MAC)"},
+            {"command": "top", "description": "Top-Verbraucher [live|24h|7d|30d] [vlan]"},
         ]})
     except Exception as e:
         log.debug("setMyCommands: %s", e)
@@ -631,9 +731,88 @@ def handle_command(text):
     if cmd == "/scan":
         threading.Thread(target=scan_once, daemon=True).start()
         return "Scan gestartet."
+    if cmd == "/traffic":
+        return cmd_traffic(devs, arg)
+    if cmd == "/top":
+        return cmd_top(devs, arg)
     return ("Befehle:\n/check NAME – Onlinestatus prüfen (live, auch IP oder MAC)\n"
             "/online [vlan] – Geräte online\n/offline [vlan] – Geräte offline\n"
-            "/status – Übersicht\n/scan – sofort scannen")
+            "/status – Übersicht\n/scan – sofort scannen\n"
+            "/traffic NAME – Traffic eines Geräts\n/top [live|24h|7d|30d] [vlan] – Top-Verbraucher")
+
+
+def traffic_problem():
+    if not TRAFFIC_ENABLED:
+        return "Traffic-Erfassung ist ausgeschaltet (TRAFFIC_ENABLED=false)."
+    if traffic_state["error"]:
+        return "⚠️ " + esc(traffic_state["error"])
+    if not traffic_state["last"]:
+        return "Noch keine Traffic-Daten – erste Abfrage läuft."
+    return ""
+
+
+def cmd_traffic(devs, arg):
+    prob = traffic_problem()
+    if not arg:
+        live = sum(rx + tx for rx, tx in live_rates.values())
+        rx24 = sum(v[0] for v in traffic_totals("24h").values())
+        tx24 = sum(v[1] for v in traffic_totals("24h").values())
+        return ((prob + "\n\n" if prob else "") +
+                f"📊 <b>Traffic gesamt</b>\nLive: {fmt_rate(live)} ({len(live_rates)} aktive Geräte)\n"
+                f"24 h: ↓ {fmt_bytes(rx24)} · ↑ {fmt_bytes(tx24)}\n\nNutze /traffic &lt;name|ip|mac&gt; oder /top")
+    hits = find_devices(devs, arg)
+    if not hits:
+        return f"Kein Gerät „{esc(arg)}“ gefunden."
+    out = []
+    for d in hits[:5]:
+        rx, tx = live_rates.get(d["id"], (0.0, 0.0))
+        lines = [f"📊 <b>{esc(display_name(d))}</b>", f"{esc(vlan_label(d['vlan']))} · {esc(d['ip'])}",
+                 f"Live: ↓ {fmt_rate(rx)} · ↑ {fmt_rate(tx)}"]
+        for rng, label in (("today", "Heute"), ("24h", "24 h"), ("7d", "7 Tage"), ("30d", "30 Tage")):
+            a, b = traffic_totals(rng, device=d["id"]).get(d["id"], (0, 0))
+            lines.append(f"{label}: ↓ {fmt_bytes(a)} · ↑ {fmt_bytes(b)}")
+        st = alert_state.get(d["id"])
+        if st and st.get("alerted"):
+            lines.append("⚠️ Traffic-Alarm aktiv")
+        out.append("\n".join(lines))
+    if len(hits) > 5:
+        out.append(f"… und {len(hits) - 5} weitere Treffer")
+    return (prob + "\n\n" if prob else "") + "\n\n".join(out)
+
+
+def cmd_top(devs, arg):
+    rng, vlan = "", None
+    for a in arg.split():
+        a = a.replace("tage", "d").replace("h24", "24h")
+        if a in ("live", "24h", "7d", "30d", "heute", "today"):
+            rng = "today" if a in ("heute", "today") else a
+        elif a.isdigit():
+            vlan = int(a)
+    by_id = {d["id"]: d for d in devs}
+    labels = {"live": "jetzt", "today": "heute", "24h": "letzte 24 h", "7d": "letzte 7 Tage", "30d": "letzte 30 Tage"}
+
+    def block(r, n):
+        vals = dict(live_rates) if r == "live" else traffic_totals(r, vlan=vlan)
+        rows = [(by_id[i], rx, tx) for i, (rx, tx) in vals.items()
+                if i in by_id and (vlan is None or by_id[i]["vlan"] == vlan) and rx + tx > 0]
+        rows.sort(key=lambda x: -(x[1] + x[2]))
+        f = fmt_rate if r == "live" else fmt_bytes
+        head = f"<b>Top {labels[r]}</b>" + (f" · {esc(vlan_label(vlan))}" if vlan is not None else "")
+        if not rows:
+            return head + "\nkeine Daten"
+        lines = [head] + [f"{i}. {esc(display_name(d))} – ↓ {f(rx)} · ↑ {f(tx)}"
+                          for i, (d, rx, tx) in enumerate(rows[:n], 1)]
+        if r != "live" and vlan is None:
+            per = {}
+            for d, rx, tx in rows:
+                per[d["vlan"]] = per.get(d["vlan"], 0) + rx + tx
+            lines.append("<i>Pro VLAN:</i> " + " · ".join(
+                f"{esc(vlan_label(v).split(' · ')[0])} {fmt_bytes(t)}" for v, t in sorted(per.items(), key=lambda x: -x[1])[:6]))
+        return "\n".join(lines)
+
+    prob = traffic_problem()
+    parts = [block(rng, 10)] if rng else [block("live", 5), block("24h", 10)]
+    return (prob + "\n\n" if prob else "") + "\n\n".join(parts)
 
 
 # --------------------------------------------------------------------------
@@ -672,6 +851,11 @@ def scan_once():
             log.debug("Leases nicht verfügbar: %s", e)
             leases = []
         lease_by_mac = {l["mac"]: l for l in leases}
+
+        # Für die Traffic-Zuordnung merken, an welchem Interface jede IP hängt
+        intf_map = {(e.get("ip") or "").strip(): e.get("intf") or "" for e in arp if e.get("intf")}
+        arp_intf.clear()
+        arp_intf.update(intf_map)
 
         # Was die Firewall gerade sieht: (mac, vlan) -> info
         seen = {}
@@ -838,12 +1022,7 @@ def scan_once():
                 db().execute(f"UPDATE devices SET {sets} WHERE id=?", (*fields.values(), d["id"]))
             db().commit()
 
-        # Benachrichtigungen
-        def notify(dev_id, kind, text, tg_text, send):
-            eid = add_event(dev_id, kind, text, "queued" if send and TG_TOKEN and TG_CHAT else "")
-            if send:
-                tg_send(tg_text, event_id=eid)
-
+        notify = notify_event
         if first_scan and new_devices:
             # Erster Scan: eine Zusammenfassung statt einer Nachricht pro Gerät
             for d in new_devices:
@@ -903,10 +1082,458 @@ def scan_once():
         scan_lock.release()
 
 
+def notify_event(dev_id, kind, text, tg_text, send):
+    """Ereignis speichern und optional per Telegram senden."""
+    eid = add_event(dev_id, kind, text, "queued" if send and TG_TOKEN and TG_CHAT else "")
+    if send:
+        tg_send(tg_text, event_id=eid)
+
+
 def scanner_loop():
     while True:
         scan_once()
         time.sleep(SCAN_INTERVAL)
+
+
+
+# --------------------------------------------------------------------------
+# Traffic
+# --------------------------------------------------------------------------
+#
+# Live: /api/diagnostics/traffic/top/<interfaces> (iftop auf der Firewall) liefert pro Adresse die
+# aktuelle Rate. Daraus werden alle TRAFFIC_INTERVAL Sekunden Bytes hochgerechnet (Rate × Zeit)
+# und pro Gerät und Stunde in SQLite addiert. Ist Insight (Netflow, „Capture local“) aktiv, werden
+# abgeschlossene Stunden durch die genaueren Netflow-Summen ersetzt.
+#
+# Die Firewall sieht nur Verkehr, der über sie läuft: ins Internet und zwischen VLANs –
+# nicht zwischen zwei Geräten im selben VLAN.
+
+arp_intf = {}           # ip -> Interface-Gerätename aus der ARP-Tabelle (z. B. vlan0.20)
+live_rates = {}         # device_id -> (rx B/s, tx B/s)
+alert_state = {}        # device_id -> {"since", "alerted", "peak"}
+traffic_state = {"error": "", "last": 0, "duration": 0, "interfaces": [], "hosts": 0,
+                 "insight": "aus" if TRAFFIC_INSIGHT == "false" else "noch nicht geprüft",
+                 "insight_error": "", "insight_last": 0}
+_ifinfo = {"ts": 0, "data": {}}
+_last_poll = {"ts": 0}
+
+RANGES = {  # Name -> (Tabelle, Bucketgröße s, Anzahl Buckets)
+    "24h": ("h", 3600, 24),
+    "7d": ("h", 6 * 3600, 28),
+    "30d": ("d", 86400, 30),
+}
+
+
+def day_start(ts):
+    """Lokale Mitternacht (Container-TZ) des Zeitpunkts."""
+    d = datetime.fromtimestamp(ts).replace(hour=0, minute=0, second=0, microsecond=0)
+    return int(time.mktime(d.timetuple()))
+
+
+def next_day(ts):
+    return day_start(day_start(ts) + 86400 + 3 * 3600)   # +3 h fängt Sommer-/Winterzeit ab
+
+
+def fmt_bytes(n):
+    n = float(n or 0)
+    for unit in ("B", "kB", "MB", "GB", "TB"):
+        if abs(n) < 1000 or unit == "TB":
+            if unit == "B":
+                return f"{int(n)} B"
+            return (f"{n:.1f}" if n < 100 else f"{n:.0f}").replace(".", ",") + f" {unit}"
+        n /= 1000
+
+
+def fmt_rate(n):
+    return fmt_bytes(n) + "/s"
+
+
+def traffic_ifaces(force=False):
+    """Interface-Liste der OPNsense (gecacht, 10 min)."""
+    if force or not _ifinfo["data"] or time.time() - _ifinfo["ts"] > 600:
+        _ifinfo["data"] = opn.traffic_interfaces()
+        _ifinfo["ts"] = time.time()
+    return _ifinfo["data"]
+
+
+def pick_ifaces(info):
+    """Welche Interfaces abgefragt werden: TRAFFIC_INTERFACES oder alle, an denen Geräte hängen."""
+    if TRAFFIC_INTERFACES:
+        return TRAFFIC_INTERFACES
+    used = set(arp_intf.values())
+    keys = [k for k, v in info.items() if v["device"] in used or k in used]
+    if keys:
+        return sorted(keys)
+    return sorted(k for k, v in info.items()
+                  if not k.startswith(("wan", "lo")) and "wan" not in (v["name"] or "").lower())
+
+
+def parse_top(res, info):
+    """Top-Talker-Antwort -> ip -> (rx B/s, tx B/s).
+
+    Ein Gerät kann auf mehreren Interfaces auftauchen (Verkehr zwischen VLANs sieht die Firewall
+    auf beiden Seiten). Genommen wird der Eintrag vom eigenen Interface laut ARP-Tabelle, sonst der
+    größte – nie die Summe, sonst würde Inter-VLAN-Verkehr doppelt gezählt.
+    """
+    dev2key = {v["device"]: k for k, v in info.items() if v.get("device")}
+    cands = {}
+    for ifname, block in (res or {}).items():
+        if not isinstance(block, dict):
+            continue
+        idents = {ifname, (info.get(ifname) or {}).get("device", ""), dev2key.get(ifname, "")} - {""}
+        for r in block.get("records") or []:
+            ip = (r.get("address") or "").strip()
+            if not ip:
+                continue
+            try:
+                rin = float(r.get("rate_bits_in") or 0) / 8
+                rout = float(r.get("rate_bits_out") or 0) / 8
+            except (TypeError, ValueError):
+                continue
+            rx, tx = (rout, rin) if TRAFFIC_SWAP else (rin, rout)
+            cands.setdefault(ip, []).append((idents, rx, tx))
+    out = {}
+    for ip, lst in cands.items():
+        own = arp_intf.get(ip)
+        match = [c for c in lst if own and own in c[0]]
+        best = match[0] if match else max(lst, key=lambda c: c[1] + c[2])
+        out[ip] = (best[1], best[2])
+    return out
+
+
+def devices_by_ip(devs):
+    """IP -> Gerät (bei doppelten IPs: online vor offline, dann zuletzt gesehen)."""
+    out = {}
+    for d in sorted(devs, key=lambda d: (d["online"], d["last_seen"] or 0)):
+        if d["ip"]:
+            out[d["ip"]] = d
+    return out
+
+
+def recompute_daily(device_ids, days):
+    """Tageswerte aus den Stundenwerten neu berechnen (hält beide Tabellen konsistent)."""
+    if not device_ids:
+        return
+    ids = ",".join(str(int(i)) for i in set(device_ids))
+    for day in set(days):
+        db().execute(
+            f"INSERT OR REPLACE INTO traffic_daily(device, ts, rx, tx) "
+            f"SELECT device, ?, SUM(rx), SUM(tx) FROM traffic_hourly "
+            f"WHERE ts >= ? AND ts < ? AND device IN ({ids}) GROUP BY device",
+            (day, day, next_day(day)))
+
+
+def add_traffic(amounts, ts):
+    """amounts: device_id -> (rx_bytes, tx_bytes) für den Zeitpunkt ts (Live-Hochrechnung)."""
+    hour = int(ts) - int(ts) % 3600
+    rows = [(dev, hour, int(rx), int(tx)) for dev, (rx, tx) in amounts.items() if rx >= 1 or tx >= 1]
+    if not rows:
+        return
+    with db_lock:
+        db().executemany(
+            "INSERT INTO traffic_hourly(device, ts, rx, tx, src) VALUES(?,?,?,?,'live') "
+            "ON CONFLICT(device, ts) DO UPDATE SET rx = rx + excluded.rx, tx = tx + excluded.tx "
+            "WHERE traffic_hourly.src = 'live'", rows)       # Insight-Stunden nicht überschreiben
+        recompute_daily([r[0] for r in rows], [day_start(hour)])
+        db().commit()
+
+
+def traffic_poll():
+    t0 = time.time()
+    info = traffic_ifaces()
+    if not info:
+        raise RuntimeError("OPNsense liefert keine Interfaces unter /api/diagnostics/traffic/interface")
+    keys = pick_ifaces(info)
+    unknown = [k for k in keys if k not in info]
+    if unknown:
+        raise RuntimeError(f"TRAFFIC_INTERFACES: unbekannte Interfaces {', '.join(unknown)} – "
+                           f"verfügbar: {', '.join(sorted(info))}")
+    res = opn.traffic_top(keys)
+    rates = parse_top(res, info)
+    now = time.time()
+    devs = list_devices()
+    by_ip = devices_by_ip(devs)
+    live = {}
+    for ip, (rx, tx) in rates.items():
+        d = by_ip.get(ip)
+        if not d:
+            continue                        # Adressen im Internet / unbekannte Geräte
+        a, b = live.get(d["id"], (0.0, 0.0))
+        live[d["id"]] = (a + rx, b + tx)
+    dt = now - _last_poll["ts"] if _last_poll["ts"] else TRAFFIC_INTERVAL
+    dt = max(1.0, min(dt, 3 * TRAFFIC_INTERVAL))   # nach Ausfällen nicht riesig hochrechnen
+    _last_poll["ts"] = now
+    live_rates.clear()
+    live_rates.update(live)
+    add_traffic({dev: (rx * dt, tx * dt) for dev, (rx, tx) in live.items()}, now)
+    traffic_state.update(error="", last=int(now), duration=round(now - t0, 1), hosts=len(live),
+                         interfaces=[f"{info[k]['name']} ({k})" for k in keys])
+    check_alerts(devs, now)
+    if not res:
+        traffic_state["error"] = ("Top Talker lieferte keine Daten – Interfaces prüfen "
+                                  f"(abgefragt: {', '.join(keys)})")
+
+
+def check_alerts(devs, now):
+    """Alarm, wenn ein beobachtetes Gerät TRAFFIC_ALERT_MINUTES lang über der Schwelle liegt."""
+    for d in devs:
+        lim = d.get("traffic_limit")
+        lim = TRAFFIC_ALERT_MBS if lim is None else lim
+        if not d["watch"] or not lim or lim <= 0:
+            alert_state.pop(d["id"], None)
+            continue
+        rx, tx = live_rates.get(d["id"], (0.0, 0.0))
+        val = {"down": rx, "up": tx}.get(TRAFFIC_ALERT_DIRECTION, rx + tx)
+        thr = lim * 1e6
+        st = alert_state.setdefault(d["id"], {"since": None, "alerted": False, "peak": 0.0})
+        what = {"down": "Download", "up": "Upload"}.get(TRAFFIC_ALERT_DIRECTION, "Traffic")
+        if val >= thr:
+            st["since"] = st["since"] or now
+            st["peak"] = max(st["peak"], val)
+            if not st["alerted"] and now - st["since"] >= TRAFFIC_ALERT_MINUTES * 60:
+                st["alerted"] = True
+                mins = round((now - st["since"]) / 60)
+                notify_event(
+                    d["id"], "traffic",
+                    f"{display_name(d)}: hoher {what} seit {mins} min ({fmt_rate(val)})",
+                    f"⚠️ <b>Hoher {what}</b> seit {mins} min\n{fmt_device(d)}\n"
+                    f"Jetzt: ↓ {fmt_rate(rx)} · ↑ {fmt_rate(tx)}\n"
+                    f"Schwelle: {fmt_rate(thr)}", True)
+        elif val < thr * 0.8:                       # etwas Hysterese gegen Flattern
+            if st["alerted"]:
+                mins = round((now - st["since"]) / 60)
+                notify_event(
+                    d["id"], "traffic",
+                    f"{display_name(d)}: {what} wieder normal (nach {mins} min, Spitze {fmt_rate(st['peak'])})",
+                    f"✅ <b>{what} wieder normal</b>\n{esc(display_name(d))} – nach {mins} min, "
+                    f"Spitze {fmt_rate(st['peak'])}", True)
+            alert_state[d["id"]] = {"since": None, "alerted": False, "peak": 0.0}
+
+
+def insight_import():
+    """Abgeschlossene Stunden aus Insight übernehmen (genauer als die Live-Hochrechnung)."""
+    if TRAFFIC_INSIGHT == "false":
+        return
+    if TRAFFIC_INSIGHT == "auto":
+        en = opn.netflow_enabled()
+        if en is False:
+            traffic_state.update(insight="nicht aktiviert (Reporting → NetFlow → „Capture local“)",
+                                 insight_error="")
+            return
+    info = _ifinfo["data"]
+    dev2key = {v["device"]: k for k, v in info.items() if v.get("device")}
+    now = int(time.time())
+    cur_hour = now - now % 3600
+    last_full = cur_hour - 3600 if now - cur_hour >= 600 else cur_hour - 7200  # Netflow schreibt verzögert
+    done = int(kv_get("insight_upto", "0") or 0)
+    start = max(done - 2 * 3600, last_full - (TRAFFIC_INSIGHT_BACKFILL - 1) * 3600)
+    imported = 0
+    for hour in range(start, last_full + 1, 3600):
+        rows = opn.insight_top(hour, hour + 3600)
+        by_ip = devices_by_ip(list_devices())
+        per = {}
+        for r in rows:
+            ip = (r.get("src_addr") or "").strip()
+            d = by_ip.get(ip)
+            if not d:
+                continue
+            intf = str(r.get("if") or "")
+            own = arp_intf.get(ip)
+            idents = {intf, (info.get(intf) or {}).get("device", ""), dev2key.get(intf, "")} - {""}
+            if own and len(idents) > 1 and own not in idents:
+                continue                     # gleicher Verkehr auf dem anderen VLAN-Interface
+            try:
+                total = int(float(r.get("total", r.get("octets", 0)) or 0))
+            except (TypeError, ValueError):
+                continue
+            rx, tx = per.get(d["id"], (0, 0))
+            if str(r.get("direction")) == "in":    # ins Firewall-Interface hinein = vom Gerät gesendet
+                tx += total
+            else:
+                rx += total
+            per[d["id"]] = (rx, tx)
+        if per:
+            with db_lock:
+                db().executemany(
+                    "INSERT OR REPLACE INTO traffic_hourly(device, ts, rx, tx, src) VALUES(?,?,?,?,'insight')",
+                    [(dev, hour, rx, tx) for dev, (rx, tx) in per.items()])
+                recompute_daily(list(per), [day_start(hour)])
+                db().commit()
+            imported += 1
+    kv_set("insight_upto", last_full)
+    traffic_state.update(insight=f"aktiv – {imported} Stunde(n) übernommen" if imported or done
+                         else "aktiv, aber keine Daten zu bekannten Geräten",
+                         insight_error="", insight_last=now)
+
+
+def traffic_cleanup():
+    now = int(time.time())
+    with db_lock:
+        db().execute("DELETE FROM traffic_hourly WHERE ts < ?", (now - TRAFFIC_HOURLY_DAYS * 86400,))
+        db().execute("DELETE FROM traffic_daily WHERE ts < ?", (now - TRAFFIC_DAILY_DAYS * 86400,))
+        db().execute("DELETE FROM traffic_hourly WHERE device NOT IN (SELECT id FROM devices)")
+        db().execute("DELETE FROM traffic_daily WHERE device NOT IN (SELECT id FROM devices)")
+        db().commit()
+
+
+def traffic_loop():
+    time.sleep(8)        # erster Scan füllt die ARP-Zuordnung
+    last_insight = last_clean = 0
+    last_err = None
+    while True:
+        t0 = time.time()
+        try:
+            traffic_poll()
+        except ApiPermissionError as e:
+            traffic_state["error"] = str(e) + " – ohne dieses Recht gibt es keine Traffic-Daten."
+        except Exception as e:
+            traffic_state["error"] = f"{type(e).__name__}: {e}" if not isinstance(e, RuntimeError) else str(e)
+            _ifinfo["ts"] = 0       # Interface-Liste beim nächsten Mal neu holen
+        if traffic_state["error"] != last_err:
+            last_err = traffic_state["error"]
+            if last_err:
+                log.warning("Traffic: %s", last_err)
+            else:
+                log.info("Traffic-Abfrage läuft (%s)", ", ".join(traffic_state["interfaces"]))
+        if time.time() - last_insight > 600:
+            last_insight = time.time()
+            try:
+                insight_import()
+            except ApiPermissionError as e:
+                traffic_state.update(insight="kein Zugriff", insight_error=str(e) +
+                                     " – nur für den Verlauf aus Insight nötig, Live-Daten laufen trotzdem.")
+            except Exception as e:
+                traffic_state.update(insight="Fehler", insight_error=f"{type(e).__name__}: {e}")
+                log.debug("Insight: %s", e)
+        if time.time() - last_clean > 3600:
+            last_clean = time.time()
+            traffic_cleanup()
+        time.sleep(max(1, TRAFFIC_INTERVAL - (time.time() - t0)))
+
+
+# ---- Auswertungen ----
+
+def range_window(rng, now=None):
+    """(Tabelle, Liste der Bucket-Startzeiten, Ende)."""
+    now = now or time.time()
+    kind, size, count = RANGES[rng]
+    if kind == "h" and size == 3600:
+        end = int(now) - int(now) % 3600 + 3600
+        return "h", [end - (count - i) * 3600 for i in range(count)], end
+    if kind == "h":                                          # 6-h-Blöcke ab lokaler Mitternacht
+        days = _last_days(now, count * size // 86400)
+        starts = [int(time.mktime(datetime.fromtimestamp(d).replace(hour=h).timetuple()))
+                  for d in days for h in range(0, 24, size // 3600)]
+        return "h", starts, next_day(days[-1])
+    days = _last_days(now, count)
+    return "d", days, next_day(days[-1])
+
+
+def _last_days(now, count):
+    """Lokale Mitternachten der letzten count Tage (heute eingeschlossen), aufsteigend."""
+    days, t = [], day_start(now)
+    for _ in range(count):
+        days.append(t)
+        t = day_start(t - 3 * 3600)
+    return days[::-1]
+
+
+def _dev_filter(device=None, vlan=None):
+    if device is not None:
+        return " AND device = ?", [int(device)]
+    if vlan is not None:
+        return " AND device IN (SELECT id FROM devices WHERE vlan = ?)", [int(vlan)]
+    return "", []
+
+
+def traffic_series(rng, device=None, vlan=None):
+    kind, starts, end = range_window(rng)
+    table = "traffic_hourly" if kind == "h" else "traffic_daily"
+    where, args = _dev_filter(device, vlan)
+    with db_lock:
+        rows = db().execute(f"SELECT ts, SUM(rx) rx, SUM(tx) tx FROM {table} WHERE ts >= ? AND ts < ?{where} "
+                            "GROUP BY ts", [starts[0], end, *args]).fetchall()
+    out = [{"ts": t, "rx": 0, "tx": 0} for t in starts]
+    bounds = starts + [end]
+    for r in rows:
+        for i in range(len(starts)):
+            if bounds[i] <= r["ts"] < bounds[i + 1]:
+                out[i]["rx"] += r["rx"] or 0
+                out[i]["tx"] += r["tx"] or 0
+                break
+    return out
+
+
+def traffic_totals(rng, device=None, vlan=None):
+    """Summen pro Gerät im Zeitraum: device_id -> (rx, tx). rng: today | 24h | 7d | 30d."""
+    now = time.time()
+    if rng == "today":
+        table, since = "traffic_hourly", day_start(now)
+    elif rng == "24h":
+        table, since = "traffic_hourly", int(now) - int(now) % 3600 - 23 * 3600
+    elif rng == "7d":
+        table, since = "traffic_hourly", day_start(now - 6 * 86400)
+    else:
+        _, days, _ = range_window("30d")
+        table, since = "traffic_daily", days[0]
+    where, args = _dev_filter(device, vlan)
+    with db_lock:
+        rows = db().execute(f"SELECT device, SUM(rx) rx, SUM(tx) tx FROM {table} WHERE ts >= ?{where} "
+                            "GROUP BY device", [since, *args]).fetchall()
+    return {r["device"]: (r["rx"] or 0, r["tx"] or 0) for r in rows}
+
+
+def traffic_status():
+    return {
+        "enabled": TRAFFIC_ENABLED, "error": traffic_state["error"], "last": traffic_state["last"],
+        "duration": traffic_state["duration"], "interfaces": traffic_state["interfaces"],
+        "hosts": traffic_state["hosts"], "interval": TRAFFIC_INTERVAL,
+        "insight": traffic_state["insight"], "insight_error": traffic_state["insight_error"],
+        "alert_mbs": TRAFFIC_ALERT_MBS, "alert_minutes": TRAFFIC_ALERT_MINUTES,
+        "alert_direction": TRAFFIC_ALERT_DIRECTION,
+    }
+
+
+def api_traffic(qs):
+    rng = qs.get("range", ["24h"])[0]
+    if rng not in ("live", "today", "24h", "7d", "30d"):
+        rng = "24h"
+    vlan = qs.get("vlan", [""])[0]
+    vlan = int(vlan) if vlan.lstrip("-").isdigit() else None
+    devs = {d["id"]: d for d in list_devices()}
+    vals = dict(live_rates) if rng == "live" else traffic_totals(rng, vlan=vlan)
+    rows, per_vlan = [], {}
+    for dev_id, (rx, tx) in vals.items():
+        d = devs.get(dev_id)
+        if not d or (vlan is not None and d["vlan"] != vlan) or (rx + tx) <= 0:
+            continue
+        rows.append({"id": dev_id, "name": display_name(d), "named": bool(d["name"]), "ip": d["ip"],
+                     "vlan": d["vlan"], "online": d["online"], "rx": rx, "tx": tx})
+        pv = per_vlan.setdefault(d["vlan"], [0, 0, 0])
+        pv[0] += rx
+        pv[1] += tx
+        pv[2] += 1
+    rows.sort(key=lambda r: r["rx"] + r["tx"], reverse=True)
+    vlans = [{"id": v, "label": vlan_label(v), "rx": a, "tx": b, "devices": n}
+             for v, (a, b, n) in sorted(per_vlan.items(), key=lambda x: -(x[1][0] + x[1][1]))]
+    out = {"range": rng, "devices": rows[:100], "vlans": vlans,
+           "total": {"rx": sum(r["rx"] for r in rows), "tx": sum(r["tx"] for r in rows), "devices": len(rows)},
+           "status": traffic_status()}
+    if rng in RANGES:
+        out["series"] = traffic_series(rng, vlan=vlan)
+    return out
+
+
+def api_device_traffic(dev_id, qs):
+    rng = qs.get("range", ["24h"])[0]
+    rng = rng if rng in RANGES else "24h"
+    totals = {}
+    for r in ("today", "24h", "7d", "30d"):
+        rx, tx = traffic_totals(r, device=dev_id).get(dev_id, (0, 0))
+        totals[r] = {"rx": rx, "tx": tx}
+    rx, tx = live_rates.get(dev_id, (0.0, 0.0))
+    return {"range": rng, "series": traffic_series(rng, device=dev_id), "totals": totals,
+            "live": {"rx": rx, "tx": tx}, "alert": alert_state.get(dev_id)}
 
 
 # --------------------------------------------------------------------------
@@ -937,6 +1564,10 @@ def api_events(qs):
 def api_state():
     devs = list_devices()
     devs.sort(key=lambda d: ip_sort_key(d["ip"]))
+    for d in devs:
+        d["rx_bps"], d["tx_bps"] = live_rates.get(d["id"], (0.0, 0.0))
+        st = alert_state.get(d["id"])
+        d["traffic_alert"] = bool(st and st.get("alerted"))
     vlans = []
     for v in VLANS + [0]:
         ds = [d for d in devs if d["vlan"] == v]
@@ -951,6 +1582,7 @@ def api_state():
         "duration": state["duration"], "interval": SCAN_INTERVAL,
         "telegram": bool(TG_TOKEN and TG_CHAT), "mode": ONLINE_MODE,
         "unifi": unifi.enabled, "unifi_error": state["unifi_error"], "unifi_names": UNIFI_USE_NAMES,
+        "traffic": traffic_status(),
     }
 
 
@@ -1009,6 +1641,16 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/events":
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             return self._send(200, api_events(qs))
+        if path == "/api/traffic":
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            return self._send(200, api_traffic(qs))
+        if path.startswith("/api/devices/") and path.endswith("/traffic"):
+            try:
+                dev_id = int(path.split("/")[3])
+            except (ValueError, IndexError):
+                return self._send(400, {"error": "bad id"})
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            return self._send(200, api_device_traffic(dev_id, qs))
         if path == "/health":
             return self._send(200, {"ok": True})
         self._send(404, {"error": "not found"})
@@ -1050,6 +1692,15 @@ class Handler(BaseHTTPRequestHandler):
             fields["name"] = str(data["name"])[:80].strip()
         if "watch" in data:
             fields["watch"] = 1 if data["watch"] else 0
+        if "traffic_limit" in data:      # MB/s; null/"" = Standard, 0 = aus
+            v = data["traffic_limit"]
+            if v is None or str(v).strip() == "":
+                fields["traffic_limit"] = None
+            else:
+                try:
+                    fields["traffic_limit"] = max(0.0, float(str(v).replace(",", ".")))
+                except ValueError:
+                    return self._send(400, {"error": "traffic_limit muss eine Zahl sein"})
         if not fields:
             return self._send(400, {"error": "nothing to update"})
         with db_lock:
@@ -1074,7 +1725,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, {"error": "bad id"})
             with db_lock:
                 db().execute("DELETE FROM devices WHERE id=?", (dev_id,))
+                db().execute("DELETE FROM traffic_hourly WHERE device=?", (dev_id,))
+                db().execute("DELETE FROM traffic_daily WHERE device=?", (dev_id,))
                 db().commit()
+            live_rates.pop(dev_id, None)
+            alert_state.pop(dev_id, None)
             return self._send(200, {"ok": True})
         self._send(404, {"error": "not found"})
 
@@ -1091,6 +1746,10 @@ def main():
     threading.Thread(target=scanner_loop, daemon=True).start()
     if TG_TOKEN and TG_CHAT and TG_COMMANDS:
         threading.Thread(target=tg_bot_loop, daemon=True).start()
+    if TRAFFIC_ENABLED:
+        threading.Thread(target=traffic_loop, daemon=True).start()
+        log.info("Traffic-Erfassung aktiv (alle %d s, Insight: %s, Alarm: %s)", TRAFFIC_INTERVAL, TRAFFIC_INSIGHT,
+                 f"> {TRAFFIC_ALERT_MBS:g} MB/s für {TRAFFIC_ALERT_MINUTES} min" if TRAFFIC_ALERT_MBS > 0 else "aus")
     log.info("NetWatch läuft auf Port %d (VLANs: %s)", WEB_PORT, ",".join(map(str, VLANS)))
     ThreadingHTTPServer(("0.0.0.0", WEB_PORT), Handler).serve_forever()
 
