@@ -9,6 +9,8 @@ Ein kleiner NetAlertX-Ersatz:
 - eigene Seite **Ereignisse** (`#/events`): neu / online / offline / IP geändert, filterbar, mit Telegram-Zustellstatus (✓ / ✕)
 - **Telegram**: Nachricht bei neuem Gerät (mit dem Namen, den das Gerät meldet), Online/Offline-Meldungen für markierte Geräte (🔔)
 - **Telegram-Befehle**: `/check NAME`, `/online [vlan]`, `/offline [vlan]`, `/status`, `/scan`, `/traffic NAME`, `/top`
+- **Netzplan** (`#/net`): alle erkannten Geräte als Plan mit Verkabelung – Gateway → VLANs → Switches/APs → Geräte,
+  Switch-Ports und WLAN aus UniFi; eigene Geräte und Kabel dazuzeichnen
 - **Traffic pro Gerät**: live ↑/↓ in der Geräteliste, Verlauf (24 h / 7 Tage / 30 Tage) in der Detailansicht, Seite **Traffic** (`#/traffic`) mit Top-Verbrauchern pro Gerät und VLAN, optional Telegram-Alarm bei Dauerlast
 
 Keine Abhängigkeiten außer Python – das Image ist sehr klein.
@@ -66,6 +68,25 @@ NetWatch fragt alle `TRAFFIC_INTERVAL` Sekunden (Standard 30) die **Top Talker**
 > **Wichtig:** Die Firewall sieht nur Verkehr, der **über sie** läuft – ins Internet und zwischen VLANs. Verkehr zwischen zwei Geräten im **selben** VLAN (z. B. PC ↔ NAS im gleichen Netz) geht direkt über den Switch und taucht in NetWatch nicht auf.
 
 Verkehr zwischen zwei VLANs sieht die Firewall auf beiden VLAN-Interfaces; NetWatch zählt ihn pro Gerät nur einmal (vom Interface, an dem das Gerät laut ARP hängt). Wirken ↑ und ↓ vertauscht, `TRAFFIC_SWAP_DIRECTION=true` setzen.
+
+## Netzplan
+
+Der Reiter **Netz** baut den Plan automatisch:
+
+- **Geräte**: alle erkannten Geräte (pro MAC der aktuellste Eintrag), mit Online-Status. Der Typ (Handy, Smart Home, TV,
+  Drucker, NAS, Switch, AP …) wird aus Name/Hersteller geraten und lässt sich ändern
+- **Mit UniFi**: Switches und APs samt Uplinks (Port, Geschwindigkeit, Mesh), Geräte am Switch-Port bzw. per WLAN am AP.
+  Das Gerät über dem obersten Switch (z. B. die OPNsense) erscheint als Uplink
+- **VLANs**: jedes VLAN ist ein Knoten am Gateway (das Gerät mit `.1`; hat die OPNsense je VLAN eine eigene MAC, wird sie
+  zu einem Gerät zusammengelegt). Geräte ohne bekannte Verbindung hängen an ihrem VLAN
+
+**Bedienen:** Fläche ziehen = verschieben, Mausrad/zwei Finger = zoomen, ⤢ = alles anzeigen. Gerät antippen zeigt IP, MAC,
+Netz und Verbindungen; Name, Typ und Notiz ändern, ausblenden oder **Details** (normale Geräteansicht). **✎ Bearbeiten**
+schaltet frei: Geräte ziehen, **+ Gerät** (z. B. Vodafone Station, Patchfeld), **⤳ Kabel ziehen** (Start- und Zielgerät
+antippen, Art und Beschriftung wie „Port 3 ↔ eth0“) und **Auto-Anordnen**. Selbst gezeichnete Kabel sind gelb.
+„Clients“ und „Offline“ blenden Endgeräte bzw. offline Geräte aus. Alles wird in der Datenbank gespeichert (`kv` → `netmap`).
+
+API: `GET /api/netmap` (Plan + gespeicherte Ergänzungen), `POST /api/netmap` (Ergänzungen speichern).
 
 ## Online-Erkennung
 

@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import queue
+import re
 import secrets
 import sqlite3
 import ssl
@@ -446,6 +447,7 @@ class UniFi:
         self.base = UNIFI_URL + ("/proxy/network" if UNIFI_IS_OS else "")
         self.ap_names = {}
         self.ap_names_ts = 0
+        self.dev_list = []    # stat/device komplett (Switches/APs mit Uplink) für den Netzplan
 
     @property
     def enabled(self):
@@ -494,8 +496,9 @@ class UniFi:
         if time.time() - self.ap_names_ts > 600:
             try:
                 res = self._get("stat/device")
+                self.dev_list = res.get("data", []) or []
                 self.ap_names = {norm_mac(d.get("mac")): d.get("name") or d.get("model") or ""
-                                 for d in res.get("data", [])}
+                                 for d in self.dev_list}
                 self.ap_names_ts = time.time()
             except Exception as e:
                 log.debug("UniFi stat/device: %s", e)
@@ -523,7 +526,10 @@ class UniFi:
                 if c.get("signal"):
                     conn += f" ({c['signal']} dBm)"
             out[mac] = {"ip": ip, "name": c.get("name") or "", "hostname": c.get("hostname") or "",
-                        "conn": conn.strip(), "vendor": c.get("oui") or ""}
+                        "conn": conn.strip(), "vendor": c.get("oui") or "",
+                        "wired": bool(c.get("is_wired")), "sw_mac": norm_mac(c.get("sw_mac")),
+                        "sw_port": c.get("sw_port") or 0, "ap_mac": norm_mac(c.get("ap_mac")),
+                        "essid": c.get("essid") or ""}
         return out
 
 
@@ -892,6 +898,9 @@ def scan_once():
         if unifi.enabled:
             try:
                 uni = unifi.clients()
+                uni_links.clear()
+                uni_links.update({m: {k: c[k] for k in ("wired", "sw_mac", "sw_port", "ap_mac", "essid")}
+                                  for m, c in uni.items()})
                 state["unifi_error"] = ""
             except Exception as e:
                 state["unifi_error"] = f"{type(e).__name__}: {e}"
@@ -1586,6 +1595,336 @@ def api_state():
     }
 
 
+# --------------------------------------------------------------------------
+# Netzplan (Reiter „Netz“): Geräte aus der Datenbank, Switches/APs und ihre Uplinks
+# aus UniFi, Verbindungen (Switch-Port / WLAN) aus dem letzten Scan. Eigene Geräte,
+# Kabel, Namen, Typen, Notizen und Positionen liegen in kv "netmap".
+# --------------------------------------------------------------------------
+uni_links = {}   # mac -> {"wired", "sw_mac", "sw_port", "ap_mac", "essid"} aus dem letzten Scan
+netmap_lock = threading.Lock()
+CONN_RE = re.compile(r"^(?:🔌\s*(.+?)(?:\s+Port\s+(\d+))?|📶\s*(.*?)\s*@\s*(.+?)(?:\s*\((-?\d+) dBm\))?)$")
+
+
+def guess_kind(*texts):
+    """Gerätetyp grob aus Name/Hersteller raten."""
+    t = " ".join(x or "" for x in texts).lower()
+    has = lambda *ws: any(w in t for w in ws)
+    if has("switch", "usw-", "usw ", "gs108", "gs308", "tl-sg"):
+        return "switch"
+    if has("access point", "u6-", "u6 ", "uap", "u7-", "nanohd", "unifi ap", "deco", "repeater"):
+        return "ap"
+    if has("iphone", "ipad", "android", "pixel", "galaxy", "handy", "phone", "xiaomi", "oneplus", "redmi", "tablet"):
+        return "phone"
+    if has("shelly", "tasmota", "sonoff", "esp-", "esp32", "esp8266", "espressif", "tuya", "hue", "zigbee", "echo",
+           "alexa", "nest", "homematic", "tado", "smart", "meross", "wled", "home assistant", "homeassistant"):
+        return "iot"
+    if has("tv", "chromecast", "roku", "firetv", "fire tv", "appletv", "apple tv", "sonos", "playstation", "xbox",
+           "nintendo", "receiver", "shield"):
+        return "tv"
+    if has("printer", "drucker", "brother", "epson", "canon", "laserjet", "officejet"):
+        return "printer"
+    if has("nas", "synology", "qnap", "truenas", "diskstation", "unraid"):
+        return "nas"
+    if has("opnsense", "pfsense", "firewall"):
+        return "gateway"
+    if has("fritz", "router", "speedport", "vodafone", "station"):
+        return "router"
+    if has("proxmox", "pve", "server", "docker", "lxc"):
+        return "server"
+    return "client"
+
+
+def _speed(mbit):
+    mbit = float(mbit or 0)
+    if mbit >= 1000:
+        return f"{int(mbit // 1000)}G" if mbit % 1000 == 0 else f"{mbit / 1000:.1f}G"
+    return f"{int(mbit)}M" if mbit > 0 else ""
+
+
+def _port_label(port, speed=0):
+    parts = []
+    if port:
+        parts.append(f"Port {int(port)}")
+    if _speed(speed):
+        parts.append(_speed(speed))
+    return " · ".join(parts)
+
+
+class _Graph:
+    def __init__(self):
+        self.nodes, self.order, self.edges, self.by_ip, self.by_mac = {}, [], [], {}, {}
+
+    def add(self, n):
+        if n["id"] in self.nodes:
+            return self.nodes[n["id"]]
+        self.nodes[n["id"]] = n
+        self.order.append(n["id"])
+        if n.get("mac"):
+            self.by_mac.setdefault(n["mac"], n["id"])
+        if n.get("ip") and n.get("kind") != "vlan":
+            self.by_ip.setdefault(n["ip"], n["id"])
+        return n
+
+    def link(self, a, b, kind, label=""):
+        if not a or not b or a == b or any(e["from"] == a and e["to"] == b for e in self.edges):
+            return
+        self.edges.append({"from": a, "to": b, "kind": kind, "label": label})
+
+    def merge(self, old, new):
+        o, n = self.nodes.get(old), self.nodes.get(new)
+        if not o or not n or old == new:
+            return
+        for k in ("mac", "vlan", "model", "ip"):
+            if not n.get(k) and o.get(k):
+                n[k] = o[k]
+        n["info"] = n.get("info", []) + o.get("info", [])
+        for e in self.edges:
+            if e["from"] == old:
+                e["from"] = new
+            if e["to"] == old:
+                e["to"] = new
+        del self.nodes[old]
+        for m in (self.by_ip, self.by_mac):
+            for k, v in list(m.items()):
+                if v == old:
+                    m[k] = new
+
+    def has_uplink(self, nid):
+        return any(e["to"] == nid and e["kind"] != "net" for e in self.edges)
+
+    def find_label(self, label, kind):
+        found = None
+        for nid in self.order:
+            n = self.nodes.get(nid)
+            if n and (n["label"] or "").strip().lower() == label.strip().lower():
+                if n["kind"] == kind:
+                    return nid
+                if found is None and n["kind"] != "vlan":
+                    found = nid
+        if found and self.nodes[found]["kind"] in ("client", "device"):
+            self.nodes[found]["kind"] = kind
+        return found
+
+
+def _unifi_kind(t, model):
+    t = (t or "").lower()
+    if t in ("ugw", "udm", "uxg"):
+        return "gateway"
+    if t == "usw" or (model or "").upper().startswith("US"):
+        return "switch"
+    if t == "uap":
+        return "ap"
+    return "device"
+
+
+def build_netmap():
+    g, warnings = _Graph(), []
+
+    # 1) UniFi-Infrastruktur mit Uplinks
+    infra = []
+    if unifi.enabled:
+        try:
+            unifi._devices()
+            infra = list(unifi.dev_list)
+        except Exception as e:
+            warnings.append(f"UniFi: {e}")
+        if state.get("unifi_error"):
+            warnings.append("UniFi: " + state["unifi_error"])
+    upstream = set()
+    for d in infra:
+        mac = norm_mac(d.get("mac"))
+        if not mac:
+            continue
+        info = []
+        if d.get("version"):
+            info.append("Firmware " + str(d["version"]))
+        if d.get("num_sta"):
+            info.append(f"{d['num_sta']} Clients")
+        g.add({"id": "mac:" + mac, "label": d.get("name") or d.get("model") or mac,
+               "kind": _unifi_kind(d.get("type"), d.get("model")), "ip": d.get("ip") or "", "mac": mac,
+               "model": d.get("model") or "", "status": "up" if d.get("state") == 1 else "down",
+               "source": "unifi", "info": info})
+    for d in infra:
+        mac, up = norm_mac(d.get("mac")), d.get("uplink") or {}
+        upmac = norm_mac(up.get("uplink_mac"))
+        if not mac or not upmac or upmac == mac:
+            continue
+        upstream.add(upmac)
+        wifi = up.get("type") == "wireless"
+        if "mac:" + upmac not in g.nodes:
+            g.add({"id": "mac:" + upmac, "label": "Uplink " + upmac, "kind": "router", "mac": upmac, "source": "unifi"})
+        g.link("mac:" + upmac, "mac:" + mac, "wifi" if wifi else "wire",
+               "Mesh" if wifi else _port_label(up.get("uplink_remote_port"), up.get("speed")))
+
+    # 2) alle erkannten Geräte, pro MAC der aktuellste Eintrag
+    devs = list_devices()
+    best = {}
+    for d in devs:
+        mac = d["mac"]
+        b = best.get(mac)
+        if not b or (d["online"], d["last_seen"] or 0) > (b["online"], b["last_seen"] or 0):
+            best[mac] = d
+    for mac, d in sorted(best.items(), key=lambda x: ip_sort_key(x[1]["ip"])):
+        nid = "mac:" + mac
+        info = []
+        if d.get("vendor"):
+            info.append("Hersteller: " + d["vendor"])
+        if d.get("conn"):
+            info.append(d["conn"])
+        if nid in g.nodes:                     # Switch/AP aus UniFi: nur ergänzen
+            n = g.nodes[nid]
+            if d.get("name") or n["label"].startswith("Uplink "):
+                n["label"] = display_name(d)
+            if not n.get("ip") and d.get("ip"):
+                n["ip"] = d["ip"]
+                g.by_ip.setdefault(d["ip"], nid)
+            n["vlan"] = vlan_label(d["vlan"])
+            n["dev_id"] = d["id"]
+            n["info"] = n.get("info", []) + info
+            if mac in upstream:
+                n["status"] = "up" if d["online"] else "down"
+            continue
+        name = display_name(d)
+        g.add({"id": nid, "label": name, "kind": guess_kind(name, d.get("hostname"), d.get("vendor")),
+               "ip": d.get("ip") or "", "mac": mac, "vlan": vlan_label(d["vlan"]), "status": "up" if d["online"] else "down",
+               "source": "netwatch", "info": info, "dev_id": d["id"]})
+
+    # 3) Verbindungen: erst strukturiert aus dem letzten Scan, sonst aus dem Text („🔌 Switch Port 3“)
+    for mac, d in best.items():
+        nid = "mac:" + mac
+        if mac in upstream or g.has_uplink(nid):
+            continue
+        l = uni_links.get(mac)
+        if l:
+            if l.get("wired") and "mac:" + l.get("sw_mac", "") in g.nodes:
+                g.link("mac:" + l["sw_mac"], nid, "wire", _port_label(l.get("sw_port")))
+                continue
+            if not l.get("wired") and "mac:" + l.get("ap_mac", "") in g.nodes:
+                g.link("mac:" + l["ap_mac"], nid, "wifi", l.get("essid") or "")
+                continue
+        m = CONN_RE.match(d.get("conn") or "")
+        if not m:
+            continue
+        if m.group(1):
+            sw = g.find_label(m.group(1), "switch")
+            if not sw:
+                sw = "sw:" + m.group(1).lower()
+                g.add({"id": sw, "label": m.group(1), "kind": "switch", "source": "netwatch"})
+            g.link(sw, nid, "wire", f"Port {m.group(2)}" if m.group(2) else "")
+        elif m.group(4):
+            ap = g.find_label(m.group(4), "ap")
+            if not ap:
+                ap = "ap:" + m.group(4).lower()
+                g.add({"id": ap, "label": m.group(4), "kind": "ap", "source": "netwatch"})
+            g.link(ap, nid, "wifi", m.group(3) or "")
+
+    # 4) VLANs als Netz-Knoten am Gateway (.1); Geräte ohne bekannte Verbindung hängen an ihrem VLAN
+    used = sorted({d["vlan"] for d in best.values() if d["vlan"]})
+    gw_for, gw_by_name = {}, {}
+    for d in devs:
+        v = d["vlan"]
+        if not v or d["ip"] != f"{SUBNET_PREFIX}.{v}.1":
+            continue
+        nid = g.by_mac.get(d["mac"])
+        if not nid:
+            continue
+        key = (d.get("name") or d.get("hostname") or "").strip().lower() or nid
+        first = gw_by_name.get(key)
+        if first and first != nid:
+            g.merge(nid, first)          # OPNsense mit eigener MAC je VLAN → ein Gerät
+            nid = first
+        else:
+            gw_by_name[key] = nid
+        gw_for[v] = nid
+        n = g.nodes.get(nid)
+        if n and n["kind"] in ("client", "device", "router"):
+            n["kind"] = "gateway"
+    for v in used:
+        vid = f"vlan:{v}"
+        g.add({"id": vid, "label": vlan_label(v), "kind": "vlan", "ip": f"{SUBNET_PREFIX}.{v}.0/24", "source": "netwatch"})
+        if gw_for.get(v) in g.nodes:
+            g.link(gw_for[v], vid, "net")
+    for mac, d in best.items():
+        nid = g.by_mac.get(mac)
+        n = g.nodes.get(nid)
+        if not n or not d["vlan"] or g.has_uplink(nid) or n["kind"] in ("gateway", "vlan"):
+            continue
+        if any(e["from"] == nid and e["to"].startswith("vlan:") for e in g.edges):
+            continue
+        g.link(f"vlan:{d['vlan']}", nid, "net")
+    for nid in list(g.order):              # Switches/APs ohne Uplink an ihr VLAN
+        n = g.nodes.get(nid)
+        if not n or n["kind"] not in ("switch", "ap") or g.has_uplink(nid) or not n.get("ip"):
+            continue
+        v = vlan_of(n["ip"])
+        if v and v in used:
+            g.link(f"vlan:{v}", nid, "net")
+
+    nodes = [g.nodes[i] for i in g.order if i in g.nodes]
+    edges, seen = [], set()
+    for e in g.edges:
+        if e["from"] not in g.nodes or e["to"] not in g.nodes or e["from"] == e["to"]:
+            continue
+        e["id"] = f"a:{e['from']}>{e['to']}"
+        if e["id"] not in seen:
+            seen.add(e["id"])
+            edges.append(e)
+    edges.sort(key=lambda e: e["id"])
+    return {"nodes": nodes, "edges": edges, "warnings": warnings, "unifi": unifi.enabled,
+            "map": netmap_load(), "updated": int(time.time())}
+
+
+def netmap_load():
+    try:
+        d = json.loads(kv_get("netmap", "") or "{}")
+    except Exception:
+        d = {}
+    if not isinstance(d, dict):
+        d = {}
+    out = {"pos": {}, "nodes": [], "edges": [], "hide_nodes": [], "hide_edges": [], "names": {}, "kinds": {}, "notes": {}}
+    for k, v in out.items():
+        if isinstance(d.get(k), type(v)):
+            out[k] = d[k]
+    return out
+
+
+def netmap_save(data):
+    if not isinstance(data, dict):
+        raise ValueError("Netzplan ungültig")
+    s = lambda v, n=300: str(v)[:n] if v is not None else ""
+    pos = {}
+    for k, v in (data.get("pos") or {}).items():
+        try:
+            pos[s(k, 200)] = [round(float(v[0]), 1), round(float(v[1]), 1)]
+        except (TypeError, ValueError, IndexError):
+            pass
+
+    def items(lst, keys):
+        out = []
+        for it in lst or []:
+            if isinstance(it, dict) and it.get("id"):
+                m = {"id": s(it["id"], 200)}
+                m.update({k: s(it[k]) for k in keys if it.get(k)})
+                out.append(m)
+        return out
+
+    def strmap(m):
+        return {s(k, 200): s(v) for k, v in (m or {}).items() if v} if isinstance(m, dict) else {}
+
+    doc = {
+        "pos": pos,
+        "nodes": items(data.get("nodes"), ("label", "kind", "ip", "note")),
+        "edges": items(data.get("edges"), ("from", "to", "kind", "label")),
+        "hide_nodes": [s(x, 200) for x in data.get("hide_nodes") or []],
+        "hide_edges": [s(x, 400) for x in data.get("hide_edges") or []],
+        "names": strmap(data.get("names")), "kinds": strmap(data.get("kinds")), "notes": strmap(data.get("notes")),
+    }
+    if len(doc["nodes"]) > 1000 or len(doc["edges"]) > 3000 or len(pos) > 5000:
+        raise ValueError("Netzplan zu groß")
+    with netmap_lock:
+        kv_set("netmap", json.dumps(doc, ensure_ascii=False))
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "NetWatch"
 
@@ -1651,6 +1990,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, {"error": "bad id"})
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             return self._send(200, api_device_traffic(dev_id, qs))
+        if path == "/api/netmap":
+            return self._send(200, build_netmap())
         if path == "/health":
             return self._send(200, {"ok": True})
         self._send(404, {"error": "not found"})
@@ -1667,6 +2008,12 @@ class Handler(BaseHTTPRequestHandler):
             add_event(None, "info", "Telegram-Test " + ("erfolgreich" if ok else "fehlgeschlagen"),
                       "sent" if ok else f"error: {err}")
             return self._send(200 if ok else 500, {"ok": ok, "error": err})
+        if path == "/api/netmap":
+            try:
+                netmap_save(self._body())
+            except ValueError as e:
+                return self._send(400, {"error": str(e)})
+            return self._send(200, {"ok": True})
         if path.startswith("/api/devices/"):
             return self._update(path)
         self._send(404, {"error": "not found"})

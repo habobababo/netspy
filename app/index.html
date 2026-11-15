@@ -204,6 +204,73 @@ details.ttab td:first-child,details.ttab th:first-child{text-align:left}
 }
 @media (min-width:821px){.nm small.m{display:none}.ev .txt .bm{display:none}}
 @media (forced-colors:active){.sw2,.hbar2 i{forced-color-adjust:none}}
+
+  /* Netzwerk */
+  #net .ntools { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 10px; }
+  #net .ntools .ibtn { padding: 6px 11px; font-size: 13.5px; }
+  #net .ntools .ibtn.on { background: var(--acc); color: #fff; border-color: var(--acc); }
+  #net .ntools label.chk { display: inline-flex; align-items: center; gap: 5px; font-size: 13.5px; color: var(--mute); margin-left: 4px; cursor: pointer; }
+  #net .nhint { font-size: 13px; color: var(--mute); margin: 0 0 8px; }
+  #net .nhint.w { color: var(--warn); }
+  .nwrap { position: relative; height: max(440px, calc(100dvh - 190px)); background: var(--panel); border: 1px solid var(--line);
+           border-radius: 12px; overflow: hidden; }
+  .nwrap.connect { outline: 2px dashed var(--acc); outline-offset: -2px; }
+  #nsvg { width: 100%; height: 100%; display: block; touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; }
+  #nsvg.panning { cursor: grabbing; }
+  .nzoom { position: absolute; right: 10px; bottom: 10px; display: flex; flex-direction: column; gap: 4px; }
+  .nzoom button { width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel2);
+                  color: var(--text); font: 600 17px/1 inherit; cursor: pointer; }
+  .nlegend { position: absolute; left: 10px; bottom: 8px; font-size: 11.5px; color: var(--mute); display: flex; gap: 12px;
+             flex-wrap: wrap; pointer-events: none; }
+  .nlegend svg { vertical-align: middle; margin-right: 4px; }
+  .nn rect.b { fill: var(--panel2); stroke: var(--line); stroke-width: 1.2; }
+  .nn:hover rect.b, .nn.sel rect.b { stroke: var(--acc); stroke-width: 2; }
+  .nn.src rect.b { stroke: var(--acc); stroke-width: 2.5; stroke-dasharray: 5 3; }
+  .nn text { fill: var(--text); font-size: 13px; }
+  .nn text.s { fill: var(--mute); font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .nn text.i { font-size: 17px; }
+  .nn .badge { fill: var(--acc); }
+  .nn text.bt { fill: #fff; font-size: 10.5px; font-weight: 700; }
+  .nn.up circle.st { fill: var(--on); } .nn.down circle.st { fill: var(--off); } .nn circle.st { fill: var(--mute2); }
+  .nn.down text { opacity: .6; }
+  .nn.dim, .ne.dim { opacity: .2; }
+  .nn.hid, .ne.hid { opacity: .35; }
+  .nn { cursor: pointer; }
+  .ne path.l { fill: none; stroke: var(--mute); stroke-width: 1.8; }
+  .ne.wifi path.l { stroke: var(--acc); stroke-dasharray: 6 5; }
+  .ne.virtual path.l { stroke: var(--mute2); stroke-width: 1.3; stroke-dasharray: 2 4; }
+  .ne.net path.l { stroke: var(--line); stroke-width: 1.6; }
+  .ne.manual path.l { stroke: var(--warn); }
+  .ne.manual.wifi path.l { stroke: var(--warn); }
+  .ne path.hit { fill: none; stroke: transparent; stroke-width: 14; cursor: pointer; }
+  .ne:hover path.l { stroke-width: 3; }
+  .ne text { fill: var(--mute); font-size: 10.5px; paint-order: stroke; stroke: var(--panel); stroke-width: 3px; }
+  #ndlg .kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 13.5px; margin: 4px 0 6px; }
+  #ndlg .kv span:nth-child(odd) { color: var(--mute); }
+  #ndlg .kv span { overflow-wrap: anywhere; }
+  #ndlg ul { margin: 4px 0; padding-left: 18px; font-size: 13.5px; }
+  #ndlg select, #ndlg textarea { width: 100%; }
+  #ndlg textarea { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; min-height: 60px; }
+  
+  #net .nsearch { flex: 1 1 200px; max-width: 280px; }
+  #ndlg { border: 1px solid var(--line); border-radius: 16px; background: var(--panel); color: var(--text); padding: 18px;
+          width: min(480px, 94vw); max-height: 90vh; overflow: auto; }
+  #ndlg::backdrop { background: rgba(0,0,0,.5); }
+  #ndlg h3 { margin: 0 0 10px; font-size: 18px; }
+  #ndlg label { display: block; font-size: 12px; color: var(--mute); margin: 10px 0 4px; }
+  #ndlg input, #ndlg select { width: 100%; background: var(--bg); border: 1px solid var(--line); border-radius: 10px;
+          padding: 10px 12px; color: var(--text); font: inherit; font-size: 15px; }
+  #ndlg textarea { background: var(--bg); padding: 10px 12px; border-radius: 10px; }
+  #ndlg .kv { display: grid; grid-template-columns: auto 1fr; }
+  #ndlg .nrow { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+  #ndlg .nrow .btn { flex: 1 1 auto; padding: 9px 12px; }
+  @media (max-width: 820px) {
+    .nwrap { height: calc(100dvh - 230px - var(--safe-b)); min-height: 360px; }
+    #net .nsearch { max-width: none; flex-basis: 100%; }
+    #ndlg input, #ndlg select, #ndlg textarea { font-size: 16px; }
+    .nlegend { display: none; }
+  }
+
 </style>
 </head>
 <body>
@@ -215,6 +282,7 @@ details.ttab td:first-child,details.ttab th:first-child{text-align:left}
       <a href="#/" data-nav="dev">Geräte</a>
       <a href="#/traffic" data-nav="tr">Traffic</a>
       <a href="#/events" data-nav="ev">Ereignisse</a>
+      <a href="#/net" data-nav="net">Netz</a>
     </nav>
     <div class="spacer"></div>
     <span class="mute" id="lastscan" style="font-size:12px"></span>
@@ -304,7 +372,10 @@ details.ttab td:first-child,details.ttab th:first-child{text-align:left}
       <button class="ibtn" onclick="clearEvents()">Ereignisse löschen</button>
     </div>
   </section>
+
+  <section id="page-net" class="hidden"></section>
 </div>
+<dialog id="ndlg"></dialog>
 
 <div class="backdrop" id="backdrop" onclick="closeSheet()"></div>
 <div class="sheet" id="sheet" role="dialog" aria-modal="true"></div>
@@ -318,6 +389,9 @@ details.ttab td:first-child,details.ttab th:first-child{text-align:left}
   </a>
   <a href="#/events" data-nav="ev">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>Ereignisse
+  </a>
+  <a href="#/net" data-nav="net">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="5" rx="1"/><rect x="2" y="17" width="6" height="5" rx="1"/><rect x="16" y="17" width="6" height="5" rx="1"/><path d="M12 7v5M5 17v-5h14v5"/></svg>Netz
   </a>
 </nav>
 <div class="toast" id="toast"></div>
@@ -806,14 +880,515 @@ async function tgTest() {
   load();
 }
 
+/* ---------- Netzplan ----------
+   Automatisch aus den erkannten Geräten + UniFi (api/netmap), eigene Geräte, Kabel, Namen und
+   Positionen werden in NetWatch gespeichert (POST api/netmap). */
+const qs = s => document.querySelector(s);
+const ls = { get: k => localStorage.getItem(k), set: (k, v) => localStorage.setItem(k, v) };
+const NK = {
+  internet: ["☁️", "Internet"], vlan: ["🧱", "Netz / VLAN"], modem: ["📡", "Modem / Router"], router: ["🧭", "Router"], gateway: ["🛡️", "Gateway / Firewall"],
+  switch: ["🔀", "Switch"], ap: ["📶", "Access Point"], server: ["🖥️", "Server / Host"], vm: ["🧩", "VM"], lxc: ["📦", "LXC"],
+  container: ["🐳", "Container"], nas: ["🗄️", "NAS"], client: ["💻", "Client"], phone: ["📱", "Handy / Tablet"],
+  tv: ["📺", "TV / Media"], iot: ["💡", "Smart Home"], printer: ["🖨️", "Drucker"], device: ["🔌", "Sonstiges"],
+};
+const EK = { wire: "Kabel", wifi: "WLAN", virtual: "Virtuell", net: "im Netz (VLAN)" };
+const CLIENT_KINDS = ["client", "phone", "iot", "tv", "printer"];
+const NW = 168, NH = 54, GX = 22, GY = 86;
+let N = null, NM = null, netBusy = false, netEdit = false, netConnect = null, netSel = null;
+let nv = (() => { try { return JSON.parse(ls.get("net.view")) || null; } catch { return null; } })();
+const nopt = { containers: ls.get("net.containers") === "1", clients: ls.get("net.clients") !== "0",
+               offline: ls.get("net.offline") !== "0", hidden: false };
+let G = { nodes: [], edges: [], byId: {}, pos: {} };
+
+async function loadNet(force) {
+  if (page() !== "net" || netBusy || (!force && (document.hidden || nDrag || document.querySelector("dialog[open]")))) return;
+  netBusy = true;
+  try {
+    const d = await (await fetch("api/netmap")).json();
+    N = d;
+    if (!NM || force) NM = JSON.parse(JSON.stringify(d.map || {}));
+    if (!qs("#net")) qs("#page-net").innerHTML = netShell();
+    if (page() === "net") netDraw();
+  } catch { if (!N) qs("#page-net").innerHTML = `<p class="mute" style="color:var(--off)">Netzplan nicht abrufbar.</p>`; }
+  finally { netBusy = false; }
+}
+setInterval(() => loadNet(false), 30000);
+
+function netShell() {
+  return `<div id="net">
+    <div class="ntools">
+      <label class="search nsearch">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--mute)"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="nq" type="search" placeholder="Gerät, IP, MAC …" oninput="netDraw()">
+      </label>
+      <button class="ibtn" id="n-edit">✎ Bearbeiten</button>
+      <span id="n-edittools" hidden>
+        <button class="ibtn" id="n-add">+ Gerät</button>
+        <button class="ibtn" id="n-wire">⤳ Kabel ziehen</button>
+        <button class="ibtn" id="n-auto">Auto-Anordnen</button>
+      </span>
+      <label class="chk"><input type="checkbox" id="n-clients"${nopt.clients ? " checked" : ""}> Clients</label>
+      <label class="chk"><input type="checkbox" id="n-off"${nopt.offline ? " checked" : ""}> Offline</label>
+      <label class="chk"><input type="checkbox" id="n-hid"${nopt.hidden ? " checked" : ""}> Ausgeblendete</label>
+    </div>
+    <div id="n-hints"></div>
+    <div class="nwrap" id="nwrap">
+      <svg id="nsvg"><g id="ng"><g id="ng-e"></g><g id="ng-n"></g></g></svg>
+      <div class="nzoom"><button id="n-zin" title="Vergrößern">+</button><button id="n-zout" title="Verkleinern">−</button><button id="n-fit" title="Alles anzeigen">⤢</button></div>
+      <div class="nlegend">
+        <span><svg width="26" height="6"><line x1="0" y1="3" x2="26" y2="3" stroke="var(--mute)" stroke-width="2"/></svg>Kabel</span>
+        <span><svg width="26" height="6"><line x1="0" y1="3" x2="26" y2="3" stroke="var(--acc)" stroke-width="2" stroke-dasharray="6 5"/></svg>WLAN</span>
+        <span><svg width="26" height="6"><line x1="0" y1="3" x2="26" y2="3" stroke="var(--line)" stroke-width="2"/></svg>im VLAN</span>
+        <span><svg width="26" height="6"><line x1="0" y1="3" x2="26" y2="3" stroke="var(--warn)" stroke-width="2"/></svg>selbst eingezeichnet</span>
+      </div>
+    </div>
+  </div>`;
+}
+
+/* automatische Daten + eigene Ergänzungen zusammenführen */
+function netGraph() {
+  const m = NM, nodes = [], byId = {};
+  const hideN = new Set(m.hide_nodes || []), hideE = new Set(m.hide_edges || []);
+  for (const a of N.nodes || []) {
+    const n = { ...a, auto: true, autoLabel: a.label };
+    if (m.names?.[n.id]) n.label = m.names[n.id];
+    if (m.kinds?.[n.id]) n.kind = m.kinds[n.id];
+    n.note = m.notes?.[n.id] || "";
+    n.hidden = hideN.has(n.id);
+    byId[n.id] = n; nodes.push(n);
+  }
+  for (const c of m.nodes || []) {
+    const n = { id: c.id, label: c.label || "Gerät", kind: c.kind || "device", ip: c.ip || "", note: c.note || "",
+                source: "manual", hidden: hideN.has(c.id) };
+    byId[n.id] = n; nodes.push(n);
+  }
+  const edges = [];
+  for (const a of N.edges || []) edges.push({ ...a, auto: true, hidden: hideE.has(a.id) });
+  for (const e of m.edges || []) edges.push({ id: e.id, from: e.from, to: e.to, kind: e.kind || "wire", label: e.label || "", manual: true });
+  // Container nur als Zahl am Host, wenn ausgeblendet
+  const ctCount = {};
+  const keep = n => {
+    if (n.hidden && !nopt.hidden) return false;
+    if (n.kind === "container" && n.auto && !nopt.containers) return false;
+    const pinned = NM.pos?.[n.id] || NM.names?.[n.id];
+    const detected = n.source === "unifi" || n.source === "netwatch";
+    if (detected && CLIENT_KINDS.includes(n.kind) && !nopt.clients && !pinned) return false;
+    if (detected && n.status === "down" && !nopt.offline && !pinned) return false;
+    return true;
+  };
+  const vis = nodes.filter(keep), visIds = new Set(vis.map(n => n.id));
+  for (const e of edges) if (byId[e.to]?.kind === "container" && !visIds.has(e.to) && visIds.has(e.from)) ctCount[e.from] = (ctCount[e.from] || 0) + 1;
+  vis.forEach(n => n.ctCount = ctCount[n.id] || 0);
+  const ve = edges.filter(e => visIds.has(e.from) && visIds.has(e.to) && (!e.hidden || nopt.hidden));
+  const g = { nodes: vis, edges: ve, byId: Object.fromEntries(vis.map(n => [n.id, n])), all: byId, allEdges: edges };
+  g.pos = netLayout(g);
+  return g;
+}
+
+/* Auto-Layout: Baum von oben nach unten; viele Endgeräte an einem Knoten als Raster */
+const ROOT_ORDER = ["internet", "modem", "router", "gateway"];
+function netLayout(g) {
+  const parent = {}, kids = {};
+  for (const e of g.edges) {
+    if (parent[e.to] !== undefined || e.from === e.to) continue;
+    parent[e.to] = e.from; (kids[e.from] ||= []).push(e.to);
+  }
+  // Zyklen kappen
+  for (const id of Object.keys(parent)) {
+    const seen = new Set([id]); let p = parent[id];
+    while (p !== undefined) { if (seen.has(p)) { kids[parent[id]] = kids[parent[id]].filter(x => x !== id); delete parent[id]; break; } seen.add(p); p = parent[p]; }
+  }
+  const rank = n => { const i = ROOT_ORDER.indexOf(n.kind); return i < 0 ? 9 : i; };
+  const sortIds = ids => ids.sort((a, b) => {
+    const A = g.byId[a], B = g.byId[b];
+    return (kids[b]?.length || 0) - (kids[a]?.length || 0) || rank(A) - rank(B) || A.label.localeCompare(B.label, "de");
+  });
+  const roots = sortIds(g.nodes.filter(n => parent[n.id] === undefined && kids[n.id]?.length).map(n => n.id));
+  const lone = g.nodes.filter(n => parent[n.id] === undefined && !kids[n.id]?.length).map(n => n.id);
+  const W = {}, pos = {};
+  const split = id => {
+    const k = sortIds([...(kids[id] || [])]);
+    const leaves = k.filter(x => !kids[x]?.length), branches = k.filter(x => kids[x]?.length);
+    return { leaves, branches, grid: leaves.length > 5 };
+  };
+  const cols = n => Math.min(4, Math.ceil(Math.sqrt(n * 1.6)));
+  const measure = id => {
+    if (W[id] !== undefined) return W[id];
+    W[id] = NW;
+    const { leaves, branches, grid } = split(id);
+    const parts = branches.map(measure);
+    if (grid) parts.unshift(cols(leaves.length) * (NW + GX) - GX); else leaves.forEach(() => parts.push(NW));
+    const sum = parts.reduce((a, b) => a + b, 0) + Math.max(0, parts.length - 1) * GX;
+    return W[id] = Math.max(NW, sum);
+  };
+  const place = (id, x0, y) => {
+    const w = measure(id);
+    pos[id] = [x0 + w / 2 - NW / 2, y];
+    const { leaves, branches, grid } = split(id);
+    const parts = [];
+    if (grid) parts.push({ grid: leaves, w: cols(leaves.length) * (NW + GX) - GX });
+    else leaves.forEach(l => parts.push({ id: l, w: NW }));
+    branches.forEach(b => parts.push({ id: b, w: measure(b) }));
+    const total = parts.reduce((a, p) => a + p.w, 0) + Math.max(0, parts.length - 1) * GX;
+    let x = x0 + (w - total) / 2;
+    for (const p of parts) {
+      if (p.grid) {
+        const c = cols(p.grid.length);
+        p.grid.forEach((l, i) => pos[l] = [x + (i % c) * (NW + GX), y + GY + Math.floor(i / c) * (NH + 24)]);
+      } else place(p.id, x, y + GY);
+      x += p.w + GX;
+    }
+  };
+  let x = 0;
+  for (const r of roots) { place(r, x, 0); x += measure(r) + GX * 3; }
+  // Einzelgänger darunter als Raster
+  let maxY = 0; Object.values(pos).forEach(p => maxY = Math.max(maxY, p[1]));
+  const c = Math.max(4, Math.floor(Math.max(x, 900) / (NW + GX)));
+  lone.forEach((id, i) => pos[id] = [(i % c) * (NW + GX), maxY + GY * 1.4 + Math.floor(i / c) * (NH + 18)]);
+  // gespeicherte Positionen haben Vorrang
+  for (const n of g.nodes) if (NM.pos?.[n.id]) pos[n.id] = NM.pos[n.id];
+  return pos;
+}
+
+function netMatch(n, q) {
+  return !q || [n.label, n.autoLabel, n.ip, n.mac, n.vlan, n.model, n.note, ...(n.ips || []), ...(n.info || [])]
+    .some(v => String(v || "").toLowerCase().includes(q));
+}
+
+function edgePath(a, b) {
+  const ax = a[0] + NW / 2, bx = b[0] + NW / 2;
+  if (b[1] >= a[1] + NH + GY && Math.abs(b[0] - a[0]) > 4) {
+    // weiter unten (zweite Reihe im Raster): seitlich am Kasten vorbei, nicht durch die Reihe darüber
+    const y1 = a[1] + NH, my = y1 + (GY - NH) / 2, tx = b[0] - 11, ym = b[1] + NH / 2;
+    return { d: `M${ax},${y1} V${my} H${tx} V${ym} H${b[0]}`, lx: bx, ly: b[1] - 5, anchor: "middle" };
+  }
+  if (b[1] >= a[1] + NH + 20) {           // Kind unterhalb: rechtwinklig wie ein Schaltplan
+    const y1 = a[1] + NH, y2 = b[1], my = y2 - Math.min(26, (y2 - y1) / 2);
+    return { d: `M${ax},${y1} V${my} H${bx} V${y2}`, lx: bx, ly: y2 - 6, anchor: "middle" };
+  }
+  if (a[1] >= b[1] + NH + 20) {
+    const y1 = a[1], y2 = b[1] + NH, my = y1 - Math.min(26, (y1 - y2) / 2);
+    return { d: `M${ax},${y1} V${my} H${bx} V${y2}`, lx: bx, ly: y2 + 12, anchor: "middle" };
+  }
+  const left = a[0] < b[0];
+  const x1 = left ? a[0] + NW : a[0], x2 = left ? b[0] : b[0] + NW, y1 = a[1] + NH / 2, y2 = b[1] + NH / 2;
+  return { d: `M${x1},${y1} L${x2},${y2}`, lx: (x1 + x2) / 2, ly: (y1 + y2) / 2 - 5, anchor: "middle" };
+}
+
+function netDraw() {
+  if (!N || !NM || !qs("#ng")) return;
+  const q = (qs("#nq")?.value || "").trim().toLowerCase();
+  G = netGraph();
+  const P = G.pos;
+  const eh = [], nh = [];
+  for (const e of G.edges) {
+    const a = P[e.from], b = P[e.to];
+    if (!a || !b) continue;
+    const p = edgePath(a, b);
+    const dim = q && !(netMatch(G.byId[e.from], q) || netMatch(G.byId[e.to], q));
+    eh.push(`<g class="ne ${e.kind}${e.manual ? " manual" : ""}${e.hidden ? " hid" : ""}${dim ? " dim" : ""}" data-eid="${esc(e.id)}">
+      <path class="l" d="${p.d}"/><path class="hit" d="${p.d}"/>
+      ${e.label ? `<text x="${p.lx}" y="${p.ly}" text-anchor="${p.anchor}">${esc(e.label)}</text>` : ""}</g>`);
+  }
+  for (const n of G.nodes) {
+    const [x, y] = P[n.id] || [0, 0];
+    const ic = (NK[n.kind] || NK.device)[0];
+    const sub = n.ip || n.vlan || (n.info || [])[0] || NK[n.kind]?.[1] || "";
+    const lbl = n.label.length > 19 ? n.label.slice(0, 18) + "…" : n.label;
+    const cls = ["nn", n.status || "", n.hidden ? "hid" : "", netSel === n.id ? "sel" : "", netConnect === n.id ? "src" : "",
+                 q && !netMatch(n, q) ? "dim" : ""].join(" ");
+    nh.push(`<g class="${cls}" data-id="${esc(n.id)}" transform="translate(${x},${y})">
+      <title>${esc([n.label, n.ip, n.mac, n.vlan, n.note].filter(Boolean).join("\n"))}</title>
+      <rect class="b" width="${NW}" height="${NH}" rx="10"/>
+      <text class="i" x="12" y="33">${ic}</text>
+      <text x="40" y="23">${esc(lbl)}</text>
+      <text class="s" x="40" y="40">${esc(sub.length > 22 ? sub.slice(0, 21) + "…" : sub)}</text>
+      ${n.status ? `<circle class="st" cx="${NW - 11}" cy="11" r="4"/>` : ""}
+      ${n.ctCount ? `<rect class="badge" x="${NW - 40}" y="${NH - 17}" width="32" height="14" rx="7"/><text class="bt" x="${NW - 24}" y="${NH - 7}" text-anchor="middle">🐳${n.ctCount}</text>` : ""}
+      ${n.note ? `<text x="${NW - 12}" y="${NH - 8}" font-size="11" text-anchor="end">📝</text>` : ""}</g>`);
+  }
+  qs("#ng-e").innerHTML = eh.join("");
+  qs("#ng-n").innerHTML = nh.join("");
+  if (!nv) netFit(); else netApplyView();
+  const h = [];
+  if (!N.unifi) h.push(`<p class="nhint">Tipp: Mit <code>UNIFI_URL</code>, <code>UNIFI_USER</code> und <code>UNIFI_PASSWORD</code> kommen Switches, APs, Switch-Ports und WLAN automatisch dazu.</p>`);
+  (N.warnings || []).forEach(w => h.push(`<p class="nhint w">⚠ ${esc(w)}</p>`));
+  if (netConnect) h.push(`<p class="nhint" style="color:var(--accent)">Kabel: jetzt das Zielgerät antippen (Esc bricht ab).</p>`);
+  else if (netEdit) h.push(`<p class="nhint">Geräte ziehen zum Verschieben · Gerät antippen für Name/Typ/Notiz · Linie antippen zum Bearbeiten.</p>`);
+  qs("#n-hints").innerHTML = h.join("");
+  qs("#nwrap").classList.toggle("connect", !!netConnect);
+  qs("#n-edit").classList.toggle("on", netEdit);
+  qs("#n-edittools").hidden = !netEdit;
+  qs("#n-wire").classList.toggle("on", !!netConnect || netWireMode);
+}
+
+/* Ansicht (Verschieben/Zoom) */
+function netApplyView() { qs("#ng")?.setAttribute("transform", `translate(${nv.x},${nv.y}) scale(${nv.k})`); }
+function netSaveView() { ls.set("net.view", JSON.stringify(nv)); }
+function netFit() {
+  const svg = qs("#nsvg"); if (!svg) return;
+  const ps = Object.values(G.pos);
+  if (!ps.length) { nv = { x: 20, y: 20, k: 1 }; netApplyView(); return; }
+  const minX = Math.min(...ps.map(p => p[0])), minY = Math.min(...ps.map(p => p[1]));
+  const maxX = Math.max(...ps.map(p => p[0])) + NW, maxY = Math.max(...ps.map(p => p[1])) + NH;
+  const r = svg.getBoundingClientRect(), pad = 30;
+  const k = Math.min(1.4, Math.max(0.15, Math.min((r.width - pad * 2) / (maxX - minX), (r.height - pad * 2 - 20) / (maxY - minY))));
+  nv = { k, x: (r.width - (maxX - minX) * k) / 2 - minX * k, y: pad - minY * k };
+  if (k < 0.5 && r.width < 720) {   // Handy: lesbar zoomen, oberstes Gerät mittig oben
+    const top = ps.reduce((a, p) => p[1] < a[1] || (p[1] === a[1] && Math.abs(p[0] - (minX + maxX) / 2) < Math.abs(a[0] - (minX + maxX) / 2)) ? p : a);
+    nv = { k: 0.7, x: r.width / 2 - (top[0] + NW / 2) * 0.7, y: pad - top[1] * 0.7 };
+  }
+  netApplyView(); netSaveView();
+}
+function netZoom(f, cx, cy) {
+  const r = qs("#nsvg").getBoundingClientRect();
+  if (cx === undefined) { cx = r.width / 2; cy = r.height / 2; }
+  const k = Math.min(3, Math.max(0.1, nv.k * f));
+  nv.x = cx - (cx - nv.x) * (k / nv.k); nv.y = cy - (cy - nv.y) * (k / nv.k); nv.k = k;
+  netApplyView(); netSaveView();
+}
+const toWorld = (cx, cy) => { const r = qs("#nsvg").getBoundingClientRect(); return [(cx - r.left - nv.x) / nv.k, (cy - r.top - nv.y) / nv.k]; };
+
+/* Zeiger: Fläche ziehen = verschieben, zwei Finger = zoomen, im Bearbeiten-Modus Geräte ziehen */
+const ptrs = new Map();
+let nDrag = null, pinch = null, netWireMode = false;
+function netDown(e) {
+  if (e.button !== undefined && e.button !== 0 && e.pointerType === "mouse") return;
+  const svg = qs("#nsvg");
+  try { svg.setPointerCapture(e.pointerId); } catch {}
+  ptrs.set(e.pointerId, [e.clientX, e.clientY]);
+  if (ptrs.size === 2) {
+    const [a, b] = [...ptrs.values()];
+    pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]), k: nv.k };
+    nDrag = null; return;
+  }
+  const node = e.target.closest(".nn"), edge = e.target.closest(".ne");
+  nDrag = { x: e.clientX, y: e.clientY, moved: false, node: node?.dataset.id, edge: edge?.dataset.eid, vx: nv.x, vy: nv.y };
+  if (nDrag.node && netEdit) { const p = G.pos[nDrag.node]; nDrag.ox = p[0]; nDrag.oy = p[1]; }
+}
+function netMove(e) {
+  if (!ptrs.has(e.pointerId)) return;
+  ptrs.set(e.pointerId, [e.clientX, e.clientY]);
+  if (pinch && ptrs.size === 2) {
+    const [a, b] = [...ptrs.values()];
+    const r = qs("#nsvg").getBoundingClientRect();
+    netZoom((Math.hypot(a[0] - b[0], a[1] - b[1]) / pinch.d) * pinch.k / nv.k, (a[0] + b[0]) / 2 - r.left, (a[1] + b[1]) / 2 - r.top);
+    return;
+  }
+  if (!nDrag) return;
+  const dx = e.clientX - nDrag.x, dy = e.clientY - nDrag.y;
+  if (!nDrag.moved && Math.hypot(dx, dy) < 5) return;
+  nDrag.moved = true;
+  if (nDrag.node && netEdit && !netConnect) {
+    const snap = v => Math.round(v / 2) * 2;
+    (NM.pos ||= {})[nDrag.node] = [snap(nDrag.ox + dx / nv.k), snap(nDrag.oy + dy / nv.k)];
+    if (!netDraw.raf) netDraw.raf = requestAnimationFrame(() => { netDraw.raf = 0; netDraw(); });
+  } else {
+    qs("#nsvg").classList.add("panning");
+    nv.x = nDrag.vx + dx; nv.y = nDrag.vy + dy; netApplyView();
+  }
+}
+function netUp(e) {
+  ptrs.delete(e.pointerId);
+  if (ptrs.size < 2) pinch = null;
+  qs("#nsvg")?.classList.remove("panning");
+  const d = nDrag; nDrag = null;
+  if (!d) return;
+  if (d.moved) { if (d.node && netEdit) netSave(); else netSaveView(); return; }
+  if (d.node) netClickNode(d.node);
+  else if (d.edge) netEdgeDlg(d.edge);
+  else if (netConnect) { netConnect = null; netWireMode = false; netDraw(); }
+}
+
+function netClickNode(id) {
+  if (netConnect || netWireMode) {
+    if (!netConnect) { netConnect = id; netDraw(); return; }
+    if (netConnect !== id) { const from = netConnect; netConnect = null; netWireMode = false; netEdgeDlg(null, from, id); }
+    else { netConnect = null; netWireMode = false; }
+    netDraw(); return;
+  }
+  netSel = id; netDraw(); netNodeDlg(id);
+}
+
+let netSaveT;
+function netSave(now) {
+  clearTimeout(netSaveT);
+  netSaveT = setTimeout(async () => {
+    try { const r = await api("api/netmap", NM); if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "HTTP " + r.status); }
+    catch (err) { toast("Netzplan nicht gespeichert: " + err.message); }
+  }, now ? 0 : 500);
+}
+
+/* Dialoge */
+const ndlg = () => qs("#ndlg");
+function kindOptions(sel) { return Object.entries(NK).map(([k, v]) => `<option value="${k}"${k === sel ? " selected" : ""}>${v[0]} ${v[1]}</option>`).join(""); }
+function netNodeDlg(id) {
+  const n = G.all[id] || G.byId[id]; if (!n) return;
+  const conns = (G.allEdges || []).filter(e => e.from === id || e.to === id).map(e => {
+    const other = G.all[e.from === id ? e.to : e.from];
+    return `<li>${e.from === id ? "→" : "←"} ${esc(other?.label || "?")}${e.label ? ` <span style="color:var(--muted)">(${esc(e.label)})</span>` : ""} · ${EK[e.kind] || e.kind}</li>`;
+  });
+  const kv = [["Typ", (NK[n.kind] || NK.device).join(" ")], ["IP", [n.ip, ...(n.ips || []).filter(x => x !== n.ip)].filter(Boolean).join(", ")],
+    ["MAC", n.mac], ["Netz", n.vlan], ["Modell", n.model],
+    ["Status", n.status === "up" ? "online" : n.status === "down" ? "offline" : ""],
+    ["Quelle", { unifi: "UniFi", netwatch: "erkannt", manual: "selbst angelegt" }[n.source] || n.source]]
+    .filter(r => r[1]);
+  const manual = n.source === "manual";
+  ndlg().innerHTML = `<form method="dialog">
+    <h3>${(NK[n.kind] || NK.device)[0]} ${esc(n.label)}</h3>
+    <div class="kv">${kv.map(r => `<span>${r[0]}</span><span>${esc(r[1])}</span>`).join("")}</div>
+    ${(n.info || []).length ? `<ul>${n.info.map(i => `<li>${esc(i)}</li>`).join("")}</ul>` : ""}
+    ${conns.length ? `<label>Verbindungen</label><ul>${conns.join("")}</ul>` : ""}
+    <label>Name${n.auto && n.autoLabel !== n.label ? ` <span style="color:var(--muted)">(automatisch: ${esc(n.autoLabel)})</span>` : ""}</label>
+    <input name="label" value="${esc(n.label)}">
+    <label>Typ</label><select name="kind">${kindOptions(n.kind)}</select>
+    ${manual ? `<label>IP</label><input name="ip" value="${esc(n.ip || "")}">` : ""}
+    <label>Notiz</label><textarea name="note" placeholder="z. B. Patchfeld 12, Kabel blau, Raum…">${esc(n.note || "")}</textarea>
+    <div class="nrow">
+      <button class="btn primary" value="save">Speichern</button>
+      <button class="btn" value="wire">⤳ Kabel von hier</button>
+      ${n.dev_id ? `<button class="btn" value="details">Details</button>` : ""}
+      <button class="btn" value="hide">${n.hidden ? "Einblenden" : "Ausblenden"}</button>
+      ${manual ? `<button class="btn danger" value="delete">Löschen</button>` : ""}
+      
+      <button class="btn" value="cancel" formnovalidate>Schließen</button>
+    </div></form>`;
+  const f = ndlg().querySelector("form");
+  ndlg().onclose = () => {
+    const act = ndlg().returnValue; netSel = null;
+    if (act === "save") {
+      const label = f.label.value.trim(), kind = f.kind.value, note = f.note.value.trim();
+      if (manual) {
+        const c = NM.nodes.find(x => x.id === id);
+        Object.assign(c, { label: label || "Gerät", kind, note, ip: f.ip.value.trim() });
+      } else {
+        NM.names ||= {}; NM.kinds ||= {}; NM.notes ||= {};
+        if (label && label !== n.autoLabel) NM.names[id] = label; else delete NM.names[id];
+        if (kind !== (N.nodes.find(x => x.id === id)?.kind)) NM.kinds[id] = kind; else delete NM.kinds[id];
+        if (note) NM.notes[id] = note; else delete NM.notes[id];
+      }
+      netSave(true);
+    } else if (act === "wire") {
+      netConnect = id;
+    } else if (act === "details") {
+      openSheet(n.dev_id);
+    } else if (act === "hide") {
+      NM.hide_nodes ||= [];
+      NM.hide_nodes = n.hidden ? NM.hide_nodes.filter(x => x !== id) : [...NM.hide_nodes, id];
+      netSave(true);
+      if (!n.hidden) toast("Ausgeblendet – „Ausgeblendete“ anhaken zum Zurückholen");
+    } else if (act === "delete" && confirm(`„${n.label}“ und seine Kabel löschen?`)) {
+      NM.nodes = NM.nodes.filter(x => x.id !== id);
+      NM.edges = (NM.edges || []).filter(e => e.from !== id && e.to !== id);
+      delete NM.pos?.[id];
+      netSave(true);
+    }
+    netDraw();
+  };
+  ndlg().returnValue = ""; ndlg().showModal();
+}
+
+function netEdgeDlg(eid, from, to) {
+  const e = eid ? (G.allEdges || []).find(x => x.id === eid) : { kind: "wire", label: "", manual: true, from, to, isNew: true };
+  if (!e) return;
+  const A = G.all[e.from], B = G.all[e.to];
+  ndlg().innerHTML = `<form method="dialog">
+    <h3>${e.isNew ? "Neues Kabel" : e.manual ? "Kabel bearbeiten" : "Verbindung"}</h3>
+    <p style="margin:0 0 6px">${esc(A?.label || "?")} → ${esc(B?.label || "?")}</p>
+    ${e.manual ? `<label>Art</label><select name="kind">${Object.entries(EK).map(([k, v]) => `<option value="${k}"${k === e.kind ? " selected" : ""}>${v}</option>`).join("")}</select>
+      <label>Beschriftung</label><input name="label" value="${esc(e.label || "")}" placeholder="z. B. Port 3 ↔ eth0, Cat7 blau">`
+      : `<div class="kv"><span>Art</span><span>${EK[e.kind] || e.kind}</span><span>Info</span><span>${esc(e.label || "–")}</span><span>Quelle</span><span>automatisch</span></div>`}
+    <div class="nrow">
+      ${e.manual ? `<button class="btn primary" value="save">Speichern</button>` : ""}
+      ${e.manual && !e.isNew ? `<button class="btn danger" value="delete">Löschen</button>` : ""}
+      ${!e.manual ? `<button class="btn" value="hide">${e.hidden ? "Einblenden" : "Ausblenden"}</button>` : ""}
+      <button class="btn" value="cancel" formnovalidate>${e.manual ? "Abbrechen" : "Schließen"}</button>
+    </div></form>`;
+  const f = ndlg().querySelector("form");
+  ndlg().onclose = () => {
+    const act = ndlg().returnValue;
+    if (act === "save") {
+      NM.edges ||= [];
+      if (e.isNew) NM.edges.push({ id: "e:" + Math.random().toString(36).slice(2, 10), from: e.from, to: e.to, kind: f.kind.value, label: f.label.value.trim() });
+      else Object.assign(NM.edges.find(x => x.id === e.id), { kind: f.kind.value, label: f.label.value.trim() });
+      netSave(true);
+    } else if (act === "delete") {
+      NM.edges = NM.edges.filter(x => x.id !== e.id); netSave(true);
+    } else if (act === "hide") {
+      NM.hide_edges ||= [];
+      NM.hide_edges = e.hidden ? NM.hide_edges.filter(x => x !== e.id) : [...NM.hide_edges, e.id];
+      netSave(true);
+    }
+    netDraw();
+  };
+  ndlg().returnValue = ""; ndlg().showModal();
+}
+
+function netAddDlg() {
+  ndlg().innerHTML = `<form method="dialog">
+    <h3>Gerät hinzufügen</h3>
+    <label>Name</label><input name="label" placeholder="z. B. Vodafone Station, OPNsense, Patchfeld" required>
+    <label>Typ</label><select name="kind">${kindOptions("device")}</select>
+    <label>IP (optional)</label><input name="ip">
+    <label>Notiz (optional)</label><textarea name="note"></textarea>
+    <div class="nrow"><button class="btn primary" value="save">Hinzufügen</button>
+      <button class="btn" value="cancel" formnovalidate>Abbrechen</button></div></form>`;
+  const f = ndlg().querySelector("form");
+  ndlg().onclose = () => {
+    if (ndlg().returnValue !== "save" || !f.label.value.trim()) return;
+    const id = "m:" + Math.random().toString(36).slice(2, 10);
+    (NM.nodes ||= []).push({ id, label: f.label.value.trim(), kind: f.kind.value, ip: f.ip.value.trim(), note: f.note.value.trim() });
+    const r = qs("#nsvg").getBoundingClientRect();
+    const [x, y] = toWorld(r.left + r.width / 2, r.top + r.height / 2);
+    (NM.pos ||= {})[id] = [Math.round(x - NW / 2), Math.round(y - NH / 2)];
+    netSave(true); netDraw();
+    toast("Hinzugefügt – mit „⤳ Kabel ziehen“ verbinden");
+  };
+  ndlg().returnValue = ""; ndlg().showModal();
+}
+
+/* Ereignisse (delegiert, weil #view neu gezeichnet wird) */
+qs("#page-net").addEventListener("pointerdown", e => { if (e.target.closest("#nsvg")) netDown(e); });
+qs("#page-net").addEventListener("pointermove", e => { if (e.target.closest("#nsvg") || nDrag || pinch) netMove(e); });
+qs("#page-net").addEventListener("pointerup", e => netUp(e));
+qs("#page-net").addEventListener("pointercancel", e => { ptrs.delete(e.pointerId); pinch = null; nDrag = null; });
+qs("#page-net").addEventListener("wheel", e => {
+  if (!e.target.closest("#nsvg")) return;
+  e.preventDefault();
+  const r = qs("#nsvg").getBoundingClientRect();
+  netZoom(Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015)), e.clientX - r.left, e.clientY - r.top);
+}, { passive: false });
+qs("#page-net").addEventListener("click", e => {
+  const id = e.target.id;
+  if (id === "n-zin") netZoom(1.25);
+  else if (id === "n-zout") netZoom(0.8);
+  else if (id === "n-fit") netFit();
+  else if (id === "n-edit") { netEdit = !netEdit; netConnect = null; netWireMode = false; netDraw(); }
+  else if (id === "n-add") netAddDlg();
+  else if (id === "n-wire") { netWireMode = !netWireMode; netConnect = null; netDraw(); if (netWireMode) toast("Erst das Startgerät, dann das Ziel antippen"); }
+  else if (id === "n-auto") {
+    if (confirm("Alle Positionen verwerfen und automatisch anordnen?")) { NM.pos = {}; netSave(true); netDraw(); netFit(); }
+  }
+});
+qs("#page-net").addEventListener("change", e => {
+  const id = e.target.id;
+  if (id === "n-clients") { nopt.clients = e.target.checked; ls.set("net.clients", nopt.clients ? "1" : "0"); netDraw(); }
+  if (id === "n-hid") { nopt.hidden = e.target.checked; netDraw(); }
+  if (id === "n-off") { nopt.offline = e.target.checked; ls.set("net.offline", nopt.offline ? "1" : "0"); netDraw(); }
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && page() === "net" && (netConnect || netWireMode)) { netConnect = null; netWireMode = false; netDraw(); }
+});
+
 /* ---------- Navigation ---------- */
-function page() { return {"#/events": "ev", "#/traffic": "tr"}[location.hash] || "dev"; }
+function page() { return {"#/events": "ev", "#/traffic": "tr", "#/net": "net"}[location.hash] || "dev"; }
 function route() {
   const p = page();
-  ["dev", "ev", "tr"].forEach(x => $("page-" + x).classList.toggle("hidden", x !== p));
+  ["dev", "ev", "tr", "net"].forEach(x => $("page-" + x).classList.toggle("hidden", x !== p));
   document.querySelectorAll("[data-nav]").forEach(a => a.classList.toggle("active", a.dataset.nav === p));
   if (p === "ev") loadEvents();
   if (p === "tr") loadTraffic();
+  if (p === "net") { if (qs("#net") && N) netDraw(); loadNet(true); }
   window.scrollTo(0, 0);
 }
 window.addEventListener("hashchange", route);
