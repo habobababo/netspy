@@ -13,7 +13,7 @@ Ein kleiner NetAlertX-Ersatz:
   Switch-Ports und WLAN aus UniFi; eigene Geräte und Kabel dazuzeichnen
 - **Traffic pro Gerät**: live ↑/↓ in der Geräteliste, Verlauf (24 h / 7 Tage / 30 Tage) in der Detailansicht, Seite **Traffic** (`#/traffic`) mit Top-Verbrauchern pro Gerät und VLAN, optional Telegram-Alarm bei Dauerlast
 
-Keine Abhängigkeiten außer Python – das Image ist sehr klein.
+Geschrieben in **Go** (ein einzelnes statisches Binary, SQLite in reinem Go eingebaut, kein CGO). Das Web-UI (`app/index.html`) wird ins Binary eingebettet.
 
 ## 1. OPNsense-API-Schlüssel
 
@@ -53,6 +53,27 @@ docker compose up -d --build
 ```
 
 Web-UI: `http://<docker-host>:8080`
+
+### Update von der Python-Version
+
+Datenbank und `.env` bleiben gleich – einfach neu bauen:
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+Gerätenamen, Ereignisse, Traffic-Verlauf und Netzplan aus `data/netwatch.db` werden übernommen.
+
+### Ohne Docker
+
+```bash
+CGO_ENABLED=0 go build -o netwatch .     # Go ≥ 1.24
+set -a; . ./.env; set +a
+DB_PATH=./data/netwatch.db ./netwatch
+```
+
+Für die Online-Prüfung per Ping muss `ping` installiert sein (bzw. `ONLINE_MODE=arp`).
 
 ## Traffic
 
